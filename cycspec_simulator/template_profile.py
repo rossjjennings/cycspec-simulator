@@ -120,19 +120,22 @@ class TemplateProfile:
         adjustment *= fudge_factor
         self.I = np.sqrt(self.I**2 + adjustment)
 
-    def plot(self, ax=None, what='IQUV', colors=None, shift=0.0):
+    def plot(self, ax=None, what='IQUV', colors=None, shift=0.0, **kwargs):
         """
         Plot the template.
 
         Parameters
         ----------
-        ax: Axes on which to plot template.
+        ax: Axes on which to plot template. If `None`, a new Figure and
+            Axes will be created.
         what: Which polarization to plot: 'I', 'ILV', or 'IQUV'.
               Ignored if template only has total intensity data.
         shift: Rotation (in cycles) to apply before plotting.
         colors: Dictionary mapping polarization component names
                 ('I', 'L', 'Q', 'U', 'V') to colors to use for plotting.
                 If `None`, use a default set of colors.
+
+        Additional keyword arguments are passed on to ax.plot().
         """
         if ax is None:
             fig = plt.figure()
@@ -166,7 +169,8 @@ class TemplateProfile:
         for name, arr in plot_arrays.items():
             phase = self.phase - shift
             arr_shifted = fft_roll(arr, shift*self.nbin)
-            lines = ax.plot(phase, arr_shifted, label=name, color=colors[name])
+            lines = ax.plot(phase, arr_shifted, label=name,
+                            color=colors[name], **kwargs)
             artists.extend(lines)
 
         ax.set_xlabel("Phase (cycles)")
