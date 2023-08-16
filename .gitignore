@@ -1,0 +1,4 @@
+*__pycache__/
+*.zap
+*.egg-info/
+build/
