@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import scipy.signal
 from astropy.io import fits
 from .interpolation import fft_roll
 
@@ -172,3 +173,17 @@ class TemplateProfile:
         ax.set_ylabel("Intensity")
         ax.legend()
         return artists
+
+    def resample(self, nbin):
+        """
+        Resample the template profile to a given number of phase bins.
+        Returns a new TemplateProfile object.
+        """
+        I = scipy.signal.resample(self.I, nbin)
+        if self.full_stokes:
+            Q = scipy.signal.resample(self.Q, nbin)
+            U = scipy.signal.resample(self.U, nbin)
+            V = scipy.signal.resample(self.V, nbin)
+            return TemplateProfile(I, Q, U, V)
+        else:
+            return TemplateProfile(I)
