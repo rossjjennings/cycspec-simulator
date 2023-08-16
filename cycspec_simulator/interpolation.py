@@ -9,8 +9,9 @@ def fft_roll(a, shift):
     This is the reverse of the convention used by pypulse.utils.fftshift().
     If the array has more than one axis, the last axis is shifted.
     """
+    n = a.shape[-1]
     try:
         shift = shift[..., np.newaxis]
     except (TypeError, IndexError): pass
-    phase = -2j*np.pi*shift*np.fft.rfftfreq(a.shape[-1])
-    return np.fft.irfft(np.fft.rfft(a)*np.exp(phase))
+    phase = -2j*np.pi*shift*np.fft.rfftfreq(n)
+    return np.fft.irfft(np.fft.rfft(a)*np.exp(phase), n)
