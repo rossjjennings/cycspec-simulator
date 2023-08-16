@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools >= 61.0", "versioneer[toml] == 0.28"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cycspec-simulator"
+version = "0.1.0"
+authors = [
+    {name = "Ross Jennings", email = "ross.jennings@nanograv.org"},
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "matplotlib",
+    "astropy",
+]
+
+[tool.versioneer]
+VCS = "git"
+style = "pep440"
+versionfile_source = "cycspec_simulator/_version.py"
+versionfile_build = "cycspec_simulator/_version.py"
+tag_prefix = "v"
+parentdir_prefix = "cycspec-simulator-"
