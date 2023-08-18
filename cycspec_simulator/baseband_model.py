@@ -1,8 +1,10 @@
 import numpy as np
 from .interpolation import fft_interp, lerp
+from .baseband_data import BasebandData
 
 class BasebandModel:
-    def __init__(self, template, bandwidth, pulse_freq, noise_level=0, rng=None):
+    def __init__(self, template, bandwidth, pulse_freq, noise_level=0,
+                 feed_poln='LIN', rng=None):
         """
         Create a new model for generating simulated baseband data.
 
@@ -12,6 +14,7 @@ class BasebandModel:
         bandwidth: Bandwidth of simulated data (same units as `pulse_freq`).
         pulse_freq: Pulse period (same units as `bandwidth`).
         noise_level: Noise variance in intensity units.
+        feed_poln: Feed polarization ('LIN' for linear or 'CIRC' for circular).
         rng: Random number generator. Expected to be a `np.random.Generator`.
              If `None`, an instance of `np.random.default_rng()` will be created.
              Only the `normal()` method will ever be called.
@@ -20,6 +23,7 @@ class BasebandModel:
         self.bandwidth = bandwidth
         self.pulse_freq = pulse_freq
         self.noise_level = noise_level
+        self.feed_poln = feed_poln.upper()
         if rng is None:
             self.rng = np.random.default_rng()
         else:
@@ -44,6 +48,7 @@ class BasebandModel:
         binno_end = binno_start + n_samples/samples_per_bin
         binno = np.linspace(binno_start, binno_end, n_samples, endpoint=False)
         I = interp(self.template.I, binno)
+        t = binno/self.template.nbin/self.pulse_freq
         noise1 = self.rng.normal(size=n_samples) + 1j*self.rng.normal(size=n_samples)
         noise2 = self.rng.normal(size=n_samples) + 1j*self.rng.normal(size=n_samples)
         noise3 = self.rng.normal(size=n_samples) + 1j*self.rng.normal(size=n_samples)
@@ -51,12 +56,24 @@ class BasebandModel:
             Q = interp(self.template.Q, binno)
             U = interp(self.template.U, binno)
             V = interp(self.template.V, binno)
-            X = np.sqrt((I + Q)/2)*noise1 + np.sqrt(self.noise_level)*noise3
-            Y = (U + 1j*V)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
-            Y /= np.sqrt(2*(I + Q)) + np.sqrt(self.noise_level)*noise3
+            if self.feed_poln == 'LIN':
+                X = np.sqrt((I + Q)/2)*noise1 + np.sqrt(self.noise_level)*noise3
+                Y = (U + 1j*V)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
+                Y /= np.sqrt(2*(I + Q))
+                Y += np.sqrt(self.noise_level)*noise3
+                return BasebandData(t, X, Y, 'LIN')
+            elif self.feed_poln == 'CIRC':
+                L = np.sqrt((I + V)/2)*noise1 + np.sqrt(self.noise_level)*noise3
+                R = (Q - 1j*U)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
+                R /= np.sqrt(2*(I + V))
+                R += np.sqrt(self.noise_level)*noise3
+                return BasebandData(t, L, R, 'CIRC')
+            else:
+                raise ValueError(f"Invalid polarization type '{self.feed_poln}'.")
         else:
-            X = np.sqrt(I/2)*noise1 + np.sqrt(self.noise_level)*noise3
-            Y = np.sqrt(I/2)*noise2 + np.sqrt(self.noise_level)*noise3
+            A = np.sqrt(I/2)*noise1 + np.sqrt(self.noise_level)*noise3
+            B = np.sqrt(I/2)*noise2 + np.sqrt(self.noise_level)*noise3
+            return BasebandData(t, A, B, self.feed_poln)
         return X, Y
 
     def sample_time(self, duration, phase_start=0, interp=lerp):

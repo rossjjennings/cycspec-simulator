@@ -1,20 +1,12 @@
 class BasebandData:
     def __init__(self, t, A, B, feed_poln):
+        self.t = t
+        self.feed_poln = feed_poln
         if feed_poln.upper() == 'LIN':
-            return LinearBasebandData(t, A, B)
-        if feed_poln.upper() == 'CIRC':
-            return CircularBasebandData(t, A, B)
-
-class LinearBasebandData(BasebandData):
-    feed_poln = 'LIN'
-    def __init__(self, t, X, Y):
-        self.t = t
-        self.X = X
-        self.Y = Y
-
-class CircularBasebandData(BasebandData):
-    feed_poln = 'CIRC'
-    def __init__(self, t, L, R):
-        self.t = t
-        self.L = L
-        self.R = R
+            self.X = A
+            self.Y = B
+        elif feed_poln.upper() == 'CIRC':
+            self.L = A
+            self.R = B
+        else:
+            raise ValueError(f"Invalid polarization type '{feed_poln}'.")
