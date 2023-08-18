@@ -24,3 +24,21 @@ def fft_interp(arr, x):
     x = np.asanyarray(x)
     phase = 2j*np.pi*x[..., np.newaxis]*np.fft.fftfreq(n)
     return np.mean(np.fft.fft(arr)*np.exp(phase), axis=-1)[()]
+
+def lerp(arr, x):
+    """
+    Linearly interpolate the values in `arr` at the locations `x`, in bins.
+    For locations `x` outside the original array, extrapolate the function
+    periodically.
+    """
+    n = arr.shape[-1]
+    x = np.asanyarray(x)
+    floor = np.floor(x)
+    t = x - floor
+    pre_idx = floor.astype(np.int64) % n
+    post_idx = np.ceil(x).astype(np.int64) % n
+    pre_val = arr[pre_idx]
+    post_val = arr[post_idx]
+    interp_val = (1-t)*pre_val + t*post_val
+
+    return interp_val[()]
