@@ -2,3 +2,4 @@
 *.zap
 *.egg-info/
 build/
+*.ipynb_checkpoints/
