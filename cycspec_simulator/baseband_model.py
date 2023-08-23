@@ -3,8 +3,8 @@ from .interpolation import fft_interp, lerp
 from .baseband_data import BasebandData
 
 class BasebandModel:
-    def __init__(self, template, bandwidth, pulse_freq, noise_level=0,
-                 feed_poln='LIN', rng=None):
+    def __init__(self, template, bandwidth, pulse_freq,
+                 noise_level=0, feed_poln='LIN', rng=None):
         """
         Create a new model for generating simulated baseband data.
 
@@ -31,7 +31,7 @@ class BasebandModel:
 
     def sample(self, n_samples, phase_start=0, interp=lerp):
         """
-        Simulate a given number of samples from the specified baseband time series.
+        Simulate a given number of samples from the modeled baseband time series.
 
         Parameters
         ----------
@@ -78,7 +78,7 @@ class BasebandModel:
 
     def sample_time(self, duration, phase_start=0, interp=lerp):
         """
-        Simulate a given number of samples from the specified baseband time series.
+        Simulate a given span of time from the modeled baseband time series.
 
         Parameters
         ----------
