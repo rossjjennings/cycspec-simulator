@@ -1,11 +1,10 @@
-class FreqOnlyPredictor:
-    def __init__(self, F0=None, P=None):
-        if F0 is not None:
-            self.F0 = F0
-        elif P is not None:
-            self.F0 = 1/P
-        else:
-            raise ValueError("Specify either F0 or P")
+import numba as nb
+from numba.experimental import jitclass
 
-    def __call__(self, t):
+@jitclass([('F0', nb.float64)])
+class FreqOnlyPredictor:
+    def __init__(self, F0):
+        self.F0 = F0
+
+    def phase(self, t):
         return self.F0*t

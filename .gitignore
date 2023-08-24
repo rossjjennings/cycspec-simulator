@@ -3,3 +3,4 @@
 *.egg-info/
 build/
 *.ipynb_checkpoints/
+*.kate-swp
