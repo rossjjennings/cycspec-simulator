@@ -2,7 +2,6 @@ import numpy as np
 import numba as nb
 from numba.experimental import jitclass
 from .interpolation import fft_interp, lerp
-from .baseband_data import BasebandData
 
 class BasebandModel:
     def __init__(self, template, bandwidth, pulse_freq,
