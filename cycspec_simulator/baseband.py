@@ -62,19 +62,19 @@ class BasebandModel:
                 Y = (U + 1j*V)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
                 Y /= np.sqrt(2*(I + Q))
                 Y += np.sqrt(self.noise_level)*noise3
-                return BasebandData(t, X, Y, 'LIN')
+                return BasebandData(t, X, Y, 'LIN', self.bandwidth)
             elif self.feed_poln == 'CIRC':
                 L = np.sqrt((I + V)/2)*noise1 + np.sqrt(self.noise_level)*noise3
                 R = (Q - 1j*U)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
                 R /= np.sqrt(2*(I + V))
                 R += np.sqrt(self.noise_level)*noise3
-                return BasebandData(t, L, R, 'CIRC')
+                return BasebandData(t, L, R, 'CIRC', self.bandwidth)
             else:
                 raise ValueError(f"Invalid polarization type '{self.feed_poln}'.")
         else:
             A = np.sqrt(I/2)*noise1 + np.sqrt(self.noise_level)*noise3
             B = np.sqrt(I/2)*noise2 + np.sqrt(self.noise_level)*noise3
-            return BasebandData(t, A, B, self.feed_poln)
+            return BasebandData(t, A, B, self.feed_poln, self.bandwidth)
         return X, Y
 
     def sample_time(self, duration, phase_start=0, interp=lerp):
@@ -95,22 +95,15 @@ class BasebandModel:
 
 @jitclass([
     ('t', nb.float64[:]),
-    ('X', nb.complex128[:]),
-    ('Y', nb.complex128[:]),
-    ('L', nb.complex128[:]),
-    ('R', nb.complex128[:]),
+    ('A', nb.complex128[:]),
+    ('B', nb.complex128[:]),
+    ('feed_poln', nb.types.unicode_type),
+    ('bandwidth', nb.float64),
 ])
 class BasebandData:
-    feed_poln: str
-
-    def __init__(self, t, A, B, feed_poln):
+    def __init__(self, t, A, B, feed_poln, bandwidth):
         self.t = t
-        self.feed_poln = feed_poln
-        if feed_poln.upper() == 'LIN':
-            self.X = A
-            self.Y = B
-        elif feed_poln.upper() == 'CIRC':
-            self.L = A
-            self.R = B
-        else:
-            raise ValueError(f"Invalid polarization type '{feed_poln}'.")
+        self.A = A
+        self.B = B
+        self.feed_poln = feed_poln.upper()
+        self.bandwidth = bandwidth
