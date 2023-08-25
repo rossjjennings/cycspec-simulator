@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 from .interpolation import fft_roll
 from .polarization import validate_stokes, coherence_to_stokes
+from .plot_helpers import symmetrize_limits
 
 class PeriodicSpectrum:
     def __init__(self, freq, I, Q=None, U=None, V=None):
@@ -23,7 +24,8 @@ class PeriodicSpectrum:
         self.nbin = self.shape[-1]
         self.phase = np.linspace(0, 1, self.nbin, endpoint=False)
 
-    def plot(self, ax=None, what='I', shift=0.0, **kwargs):
+    def plot(self, ax=None, what='I', shift=0.0, sym_lim=False, vmin=None, vmax=None,
+             **kwargs):
         """
         Plot the periodic spectrum.
 
@@ -43,7 +45,9 @@ class PeriodicSpectrum:
 
         arr = getattr(self, what)
         arr = fft_roll(arr, shift*self.nbin)
-        pc = ax.pcolormesh(self.phase, self.freq/1e6, arr, **kwargs)
+        if sym_lim:
+            vmin, vmax = symmetrize_limits(arr, vmin, vmax)
+        pc = ax.pcolormesh(self.phase, self.freq/1e6, arr, vmin=vmin, vmax=vmax, **kwargs)
         ax.set_xlabel('Phase (cycles)')
         ax.set_ylabel('Frequency (MHz)')
 
@@ -127,7 +131,7 @@ def pspec_corrfirst(data, nchan, nbin, phase_predictor):
         folded_corr_AA[:, ibin] += np.sum(outer_corr_AA[phase_bin==ibin, :], axis=0)
         folded_corr_AB[:, ibin] += np.sum(outer_corr_AB[phase_bin==ibin, :], axis=0)
         folded_corr_BA[:, ibin] += np.sum(outer_corr_BA[phase_bin==ibin, :], axis=0)
-        folded_corr_AA[:, ibin] += np.sum(outer_corr_BB[phase_bin==ibin, :], axis=0)
+        folded_corr_BB[:, ibin] += np.sum(outer_corr_BB[phase_bin==ibin, :], axis=0)
         samples[ibin] += np.sum(phase_bin==ibin)
     pspec_AA = np.fft.fftshift(np.fft.hfft(folded_corr_AA, axis=0), axes=0)
     pspec_BB = np.fft.fftshift(np.fft.hfft(folded_corr_BB, axis=0), axes=0)
@@ -152,7 +156,7 @@ def pspec_corrfirst(data, nchan, nbin, phase_predictor):
     return pspec
 
 @nb.njit
-def cycfold_numba(data, nchan, nbin, phase_predictor):
+def cycfold_numba(data, nchan, nbin, phase_predictor, use_midtime=True):
     nlag = nchan//2 + 1
     ncorr = data.A.size - nlag + 1
     corr_AA = np.zeros((nlag, nbin), dtype=np.complex128)
@@ -161,7 +165,11 @@ def cycfold_numba(data, nchan, nbin, phase_predictor):
     corr_BB = np.zeros((nlag, nbin), dtype=np.complex128)
     samples = np.zeros(nbin, dtype=np.int64)
     for icorr in range(ncorr):
-        phase = phase_predictor.phase(data.t[icorr]) % 1
+        if use_midtime:
+            time = (data.t[icorr] + data.t[icorr + ilag])/2
+        else:
+            time = data.t[icorr]
+        phase = phase_predictor.phase(time) % 1
         phase_bin = np.int64(phase*nbin)
         samples[phase_bin] += 1
         for ilag in range(nlag):
@@ -181,8 +189,8 @@ def pspec_numba(data, nchan, nbin, phase_predictor):
     corr_CI = (corr_AB - corr_BA)/2j
     pspec_AA = np.fft.fftshift(np.fft.hfft(corr_AA, axis=0), axes=0)
     pspec_BB = np.fft.fftshift(np.fft.hfft(corr_BB, axis=0), axes=0)
-    pspec_CR = np.fft.fftshift(np.fft.hfft(corr_BB, axis=0), axes=0)
-    pspec_CI = np.fft.fftshift(np.fft.hfft(corr_BB, axis=0), axes=0)
+    pspec_CR = np.fft.fftshift(np.fft.hfft(corr_CR, axis=0), axes=0)
+    pspec_CI = np.fft.fftshift(np.fft.hfft(corr_CI, axis=0), axes=0)
 
     I, Q, U, V = coherence_to_stokes(
         pspec_AA,
