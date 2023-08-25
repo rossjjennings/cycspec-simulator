@@ -50,16 +50,25 @@ class BasebandModel:
         binno = np.linspace(binno_start, binno_end, n_samples, endpoint=False)
         I = interp(self.template.I, binno)
         t = binno/self.template.nbin/self.pulse_freq
-        noise1 = self.rng.normal(size=n_samples) + 1j*self.rng.normal(size=n_samples)
-        noise2 = self.rng.normal(size=n_samples) + 1j*self.rng.normal(size=n_samples)
-        noise3 = self.rng.normal(size=n_samples) + 1j*self.rng.normal(size=n_samples)
+        noise1 = (
+            (self.rng.normal(size=n_samples) + 1j*self.rng.normal(size=n_samples))
+            /np.sqrt(2)
+        )
+        noise2 = (
+            (self.rng.normal(size=n_samples) + 1j*self.rng.normal(size=n_samples))
+            /np.sqrt(2)
+        )
+        noise3 = (
+            (self.rng.normal(size=n_samples) + 1j*self.rng.normal(size=n_samples))
+            /np.sqrt(2)
+        )
         if self.template.full_stokes:
             Q = interp(self.template.Q, binno)
             U = interp(self.template.U, binno)
             V = interp(self.template.V, binno)
             if self.feed_poln == 'LIN':
                 X = np.sqrt((I + Q)/2)*noise1 + np.sqrt(self.noise_level)*noise3
-                Y = (U + 1j*V)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
+                Y = (U - 1j*V)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
                 Y /= np.sqrt(2*(I + Q))
                 Y += np.sqrt(self.noise_level)*noise3
                 return BasebandData(t, X, Y, 'LIN', self.bandwidth)
