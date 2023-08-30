@@ -1,6 +1,8 @@
 # See also "Notes on the GUPPI Raw Data Format", S. Ellingson,
 # https://www.cv.nrao.edu/~pdemores/GUPPI_Raw_Data_Format/
 import numpy as np
+import dask
+import dask.array as da
 import os
 import numbers
 
@@ -42,7 +44,13 @@ class GuppiRawHeader:
     def from_fh(cls, fh):
         cards = {}
         while True:
-            card = fh.read(80).decode('ascii')
+            try:
+                card_bytes = fh.read(80)
+                card = card_bytes.decode('ascii')
+            except UnicodeDecodeError:
+                print(f"current position: {fh.tell()}")
+                print(f"card bytes: {card_bytes}")
+                raise
             if len(card) < 80:
                 raise EOFError("Reached end of file")
             if card.startswith("END"):
@@ -75,31 +83,84 @@ def read_headers(filename):
                 header = GuppiRawHeader.from_fh(fh)
             except EOFError:
                 return
+            yield header
+            fh.seek(header['BLOCSIZE'], os.SEEK_CUR)
+
+def read(filename, use_dask=True):
+    headers = []
+    chunks = []
+    which_chunk = 0
+    with open(filename, 'rb') as fh:
+        while True:
+            try:
+                header = GuppiRawHeader.from_fh(fh)
+                headers.append(header)
+            except EOFError:
+                break
+
+            npol = int(header['NPOL'])
+            if npol != 4:
+                raise ValueError(f"NPOL = {npol} not supported")
+            nbits = int(header['NBITS'])
+            dtype = np.dtype(f"int{nbits}")
+            nchan = int(header['OBSNCHAN'])
+            blocsize = header['BLOCSIZE']
+            nsamples = blocsize//(nchan*2*2*dtype.itemsize)
+
+            dtype = np.dtype(f"int{nbits}")
+            shape = (nchan, nsamples, 2, 2) # last two axes are polarization, I/Q
+
+            if use_dask:
+                delayed = dask.delayed(np.memmap)(
+                    filename, mode='r', shape=shape, dtype=dtype, offset=fh.tell()
+                )
+                chunk = da.from_delayed(delayed, shape=shape, dtype=dtype, name=False)
+                fh.seek(blocsize, os.SEEK_CUR)
             else:
-                yield header
-                fh.seek(header['BLOCSIZE'], os.SEEK_CUR)
+                chunk = np.frombuffer(fh.read(blocsize), dtype=dtype).reshape(shape)
+            if which_chunk > 0:
+                chunk = chunk[:,int(header['OVERLAP']):]
+            chunks.append(chunk)
+            which_chunk += 1
+    if use_dask:
+        data = da.concatenate(chunks, axis=1)
+    else:
+        data = np.concatenate(chunks, axis=1)
+    return headers, data
 
-def read_frame(fh):
-    header = GuppiRawHeader.from_fh(fh)
-    data_start = fh.tell()
+def quantize(data, out_dtype=np.int8, autoscale=True):
+    stacked = np.stack([data.A, data.B], axis=-1)
+    split = np.stack([stacked.real, stacked.imag], axis=-1)
+    if autoscale:
+        maxval = np.max(np.abs(split))
+        mant, expt = np.frexp(maxval)
+        nbits = 8*np.dtype(out_dtype).itemsize
+        split *= 2**(nbits-1-expt)
+    return (split).astype(out_dtype)
 
-    npol = int(header['NPOL'])
-    if npol != 4:
-        raise ValueError(f"NPOL = {npol} not supported")
+def write(filename, data, header, blocsize=None, overlap=0, out_dtype=np.int8, autoscale=True):
+    """
+    Write data to a GUPPI raw file.
+    Currently very limited -- can only write a single frame with one channel.
+    """
+    if not isinstance(header, GuppiRawHeader):
+        # assume it's a dict, or dict-like
+        header = GuppiRawHeader(header)
+    nchan = 1
+    nbytes = 8*np.dtype(out_dtype).itemsize
+    if blocsize is None:
+        datasize = data.t.shape[0]*nchan*2*2*nbytes
+        blocsize = datasize
 
-    nbits = int(header['NBITS'])
-    dtype = np.dtype(f"int{nbits}")
+    header['NPOL'] = '4'
+    header['NBITS'] = 8*nbytes
+    header['OBSNCHAN'] = str(nchan)
+    header['BLOCSIZE'] = blocsize
+    header['OVERLAP'] = overlap
 
-    nchan = int(header['OBSNCHAN'])
-    overlap = int(header['OVERLAP'])
-    blocsize = header['BLOCSIZE']
-    frame = np.frombuffer(fh.read(blocsize), dtype=dtype)
-    frame = frame.reshape(nchan, -1, 2, 2)
-    return header, frame
+    quantized_data = quantize(data, out_dtype, autoscale)
 
-def read_dask():
-    pass
-
-def write_frame(arr, header, fh):
-    for card in header.cards_as_bytes():
-        fh.write(card)
+    with open(filename, 'wb') as fh:
+        for card in header.cards_as_bytes():
+            fh.write(card)
+        fh.write(quantized_data.tobytes())
