@@ -156,19 +156,26 @@ def pspec_corrfirst(data, nchan, nbin, phase_predictor):
     return pspec
 
 @nb.njit
-def cycfold_numba(data, nchan, nbin, phase_predictor):
+def cycfold_numba(data, nchan, nbin, phase_predictor, use_midpt=True, round_to_nearest=True):
     nlag = nchan//2 + 1
     ncorr = data.A.size - nlag + 1
     corr_AA = np.zeros((nlag, nbin), dtype=np.complex128)
     corr_AB = np.zeros((nlag, nbin), dtype=np.complex128)
     corr_BA = np.zeros((nlag, nbin), dtype=np.complex128)
     corr_BB = np.zeros((nlag, nbin), dtype=np.complex128)
-    samples = np.zeros(nbin, dtype=np.int64)
+    samples = np.zeros((nlag, nbin), dtype=np.int64)
     for icorr in range(ncorr):
-        phase = phase_predictor.phase(data.t[icorr]) % 1
-        phase_bin = np.int64(phase*nbin)
-        samples[phase_bin] += 1
         for ilag in range(nlag):
+            if use_midpt:
+                t = (data.t[icorr] + data.t[icorr + ilag])/2
+            else:
+                t = data.t[icorr]
+            phase = phase_predictor.phase(t) % 1
+            if round_to_nearest:
+                phase_bin = np.int64(np.round(phase*nbin)) % nbin
+            else:
+                phase_bin = np.int64(phase*nbin)
+            samples[ilag, phase_bin] += 1
             corr_AA[ilag, phase_bin] += data.A[icorr + ilag]*data.A[icorr].conjugate()
             corr_AB[ilag, phase_bin] += data.A[icorr + ilag]*data.B[icorr].conjugate()
             corr_BA[ilag, phase_bin] += data.B[icorr + ilag]*data.A[icorr].conjugate()
@@ -179,8 +186,9 @@ def cycfold_numba(data, nchan, nbin, phase_predictor):
     corr_BB /= samples
     return corr_AA, corr_AB, corr_BA, corr_BB
 
-def pspec_numba(data, nchan, nbin, phase_predictor):
-    corr_AA, corr_AB, corr_BA, corr_BB = cycfold_numba(data, nchan, nbin, phase_predictor)
+def pspec_numba(data, nchan, nbin, phase_predictor, use_midpt=True, round_to_nearest=True):
+    corr_AA, corr_AB, corr_BA, corr_BB = cycfold_numba(data, nchan, nbin, phase_predictor,
+                                                       use_midpt, round_to_nearest)
     corr_CR = (corr_AB + corr_BA)/2
     corr_CI = (corr_AB - corr_BA)/2j
     pspec_AA = np.fft.fftshift(np.fft.hfft(corr_AA, axis=0), axes=0)
