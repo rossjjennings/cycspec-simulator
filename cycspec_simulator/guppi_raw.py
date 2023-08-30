@@ -147,7 +147,7 @@ def write(filename, data, header, blocsize=None, overlap=0, out_dtype=np.int8, a
         # assume it's a dict, or dict-like
         header = GuppiRawHeader(header)
     nchan = 1
-    nbytes = 8*np.dtype(out_dtype).itemsize
+    nbytes = np.dtype(out_dtype).itemsize
     if blocsize is None:
         datasize = data.t.shape[0]*nchan*2*2*nbytes
         blocsize = datasize
@@ -163,4 +163,5 @@ def write(filename, data, header, blocsize=None, overlap=0, out_dtype=np.int8, a
     with open(filename, 'wb') as fh:
         for card in header.cards_as_bytes():
             fh.write(card)
+        fh.write(b"END" + b" "*77)
         fh.write(quantized_data.tobytes())
