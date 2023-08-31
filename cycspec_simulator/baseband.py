@@ -4,7 +4,7 @@ from numba.experimental import jitclass
 from .interpolation import fft_interp, lerp
 
 class BasebandModel:
-    def __init__(self, template, bandwidth, pulse_freq,
+    def __init__(self, template, bandwidth, predictor,
                  noise_level=0, feed_poln='LIN', rng=None):
         """
         Create a new model for generating simulated baseband data.
@@ -22,7 +22,7 @@ class BasebandModel:
         """
         self.template = template
         self.bandwidth = bandwidth
-        self.pulse_freq = pulse_freq
+        self.predictor = predictor
         self.noise_level = noise_level
         self.feed_poln = feed_poln.upper()
         if rng is None:
@@ -30,7 +30,7 @@ class BasebandModel:
         else:
             self.rng = rng
 
-    def sample(self, n_samples, phase_start=0, interp=lerp):
+    def sample(self, n_samples, t_start=0, interp=lerp):
         """
         Simulate a given number of samples from the modeled baseband time series.
 
@@ -43,13 +43,11 @@ class BasebandModel:
                 evaluate the interpolated function (extended periodically).
                 `fft_interp` and `lerp` (the default) both work.
         """
-        samples_per_period = self.bandwidth/self.pulse_freq
-        samples_per_bin = samples_per_period/self.template.nbin
-        binno_start = phase_start*self.template.nbin
-        binno_end = binno_start + n_samples/samples_per_bin
-        binno = np.linspace(binno_start, binno_end, n_samples, endpoint=False)
+        t_span = n_samples/self.bandwidth
+        t = np.linspace(t_start, t_start + t_span, n_samples, endpoint=False)
+        phase = self.predictor.phase(t)
+        binno = phase*self.template.nbin
         I = interp(self.template.I, binno)
-        t = binno/self.template.nbin/self.pulse_freq
         noise1 = (
             (self.rng.normal(size=n_samples) + 1j*self.rng.normal(size=n_samples))
             /np.sqrt(2)
