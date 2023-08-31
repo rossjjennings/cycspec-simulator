@@ -37,9 +37,9 @@ class PolynomialPredictor:
         self.log10_fit_err = log10_fit_err
         self.coeffs = coeffs
 
-    @classmethod
-    def from_record(cls, rec):
-        return cls(
+    @staticmethod
+    def from_record(rec):
+        return PolynomialPredictor(
             span = rec['NSPAN'],
             site = rec['NSITE'],
             ref_freq = rec['REF_FREQ'],
@@ -53,8 +53,8 @@ class PolynomialPredictor:
             log10_fit_err = rec['LGFITERR'],
         )
 
-    @classmethod
-    def parse(cls, lines):
+    @staticmethod
+    def parse(lines):
         i = 0
         polycos = []
         while i < len(lines):
@@ -72,7 +72,7 @@ class PolynomialPredictor:
                 coeffs.extend([float(part.replace('D', 'E')) for part in lines[i + j].split()])
                 j += 1
             i += j
-            polycos.append(cls(
+            polycos.append(PolynomialPredictor(
                 span=int(span),
                 site=site,
                 ref_freq=float(ref_freq),
