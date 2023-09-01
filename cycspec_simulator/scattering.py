@@ -108,4 +108,5 @@ class ScintillationPattern:
             convolve(data.B, self.impulse_response, mode='valid'),
             data.feed_poln,
             data.bandwidth,
+            data.obsfreq,
         )

@@ -4,7 +4,7 @@ from numba.experimental import jitclass
 from .interpolation import fft_interp, lerp
 
 class BasebandModel:
-    def __init__(self, template, bandwidth, predictor,
+    def __init__(self, template, bandwidth, predictor, obsfreq=0,
                  noise_level=0, feed_poln='LIN', rng=None):
         """
         Create a new model for generating simulated baseband data.
@@ -13,7 +13,10 @@ class BasebandModel:
         ----------
         template: TemplateProfile object representing the pulse profile.
         bandwidth: Bandwidth of simulated data (same units as `pulse_freq`).
-        pulse_freq: Pulse period (same units as `bandwidth`).
+        predictor: Pulse phase predictor.
+        obsfreq: Observing frequency (used in plotting and headers only, same
+                 units
+                 as `bandwidth`).
         noise_level: Noise variance in intensity units.
         feed_poln: Feed polarization ('LIN' for linear or 'CIRC' for circular).
         rng: Random number generator. Expected to be a `np.random.Generator`.
@@ -23,6 +26,7 @@ class BasebandModel:
         self.template = template
         self.bandwidth = bandwidth
         self.predictor = predictor
+        self.obsfreq = obsfreq
         self.noise_level = noise_level
         self.feed_poln = feed_poln.upper()
         if rng is None:
@@ -69,19 +73,19 @@ class BasebandModel:
                 Y = (U - 1j*V)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
                 Y /= np.sqrt(2*(I + Q))
                 Y += np.sqrt(self.noise_level)*noise3
-                return BasebandData(t, X, Y, 'LIN', self.bandwidth)
+                return BasebandData(t, X, Y, 'LIN', self.bandwidth, self.obsfreq)
             elif self.feed_poln == 'CIRC':
                 L = np.sqrt((I + V)/2)*noise1 + np.sqrt(self.noise_level)*noise3
                 R = (Q - 1j*U)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
                 R /= np.sqrt(2*(I + V))
                 R += np.sqrt(self.noise_level)*noise3
-                return BasebandData(t, L, R, 'CIRC', self.bandwidth)
+                return BasebandData(t, L, R, 'CIRC', self.bandwidth, self.obsfreq)
             else:
                 raise ValueError(f"Invalid polarization type '{self.feed_poln}'.")
         else:
             A = np.sqrt(I/2)*noise1 + np.sqrt(self.noise_level)*noise3
             B = np.sqrt(I/2)*noise2 + np.sqrt(self.noise_level)*noise3
-            return BasebandData(t, A, B, self.feed_poln, self.bandwidth)
+            return BasebandData(t, A, B, self.feed_poln, self.bandwidth, self.obsfreq)
         return X, Y
 
     def sample_time(self, duration, phase_start=0, interp=lerp):
@@ -106,11 +110,13 @@ class BasebandModel:
     ('B', nb.complex128[:]),
     ('feed_poln', nb.types.unicode_type),
     ('bandwidth', nb.float64),
+    ('obsfreq', nb.float64),
 ])
 class BasebandData:
-    def __init__(self, t, A, B, feed_poln, bandwidth):
+    def __init__(self, t, A, B, feed_poln, bandwidth, obsfreq):
         self.t = t
         self.A = A
         self.B = B
         self.feed_poln = feed_poln.upper()
         self.bandwidth = bandwidth
+        self.obsfreq = obsfreq
