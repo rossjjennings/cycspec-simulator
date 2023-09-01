@@ -16,13 +16,18 @@ def polyval_numba(x, c):
         i -= 1
     return y
 
-@jitclass([('F0', nb.float64)])
+@jitclass([
+    ('f0', nb.float64),
+    ('epoch_mjd', nb.int32),
+    ('epoch_sec', nb.int32),
+    ('epoch_offset', nb.float64),
+])
 class FreqOnlyPredictor:
-    def __init__(self, F0):
-        self.F0 = F0
+    def __init__(self, f0):
+        self.f0 = f0
 
     def phase(self, t):
-        return self.F0*t
+        return self.f0*t
 
 @jitclass([
     ('span', nb.int64),
