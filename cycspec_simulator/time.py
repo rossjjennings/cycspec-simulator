@@ -15,7 +15,23 @@ class Time:
     floating-point offset from that epoch, in seconds.
     Necessary because Numba doesn't play well with Astropy Time objects.
     """
+    def __init__(self, mjd, second, offset):
+        """
+        Create a Time object.
 
+        Parameters
+        ----------
+        mjd: Integer MJD.
+        second: Integer number of seconds, relative to UTC midnight
+                on the specified MJD.
+        offset: Offset from the epoch, in seconds. Can represent the fractional
+                second part of the time, but can also be greater than 1 second.
+                To maintain nanosecond accuracy, should be kept to less than
+                2**22 seconds (48.5 days).
+        """
+        self.mjd = mjd
+        self.second = second
+        self.offset = offset
 
 @jitclass([
     ('mjd', nb.int32),
