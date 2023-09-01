@@ -6,13 +6,27 @@ from numba.experimental import jitclass
 @jitclass([
     ('mjd', nb.int32),
     ('second', nb.int32),
+    ('offset', nb.float64),
+])
+class Time:
+    """
+    A one-dimensional array of time values, represented as an epoch,
+    specified by an integer MJD and integer second, and a 64-bit
+    floating-point offset from that epoch, in seconds.
+    Necessary because Numba doesn't play well with Astropy Time objects.
+    """
+
+
+@jitclass([
+    ('mjd', nb.int32),
+    ('second', nb.int32),
     ('offset', nb.float64[:]),
 ])
 class TimeSequence:
     """
     A one-dimensional array of time values, represented as an epoch,
     specified by an integer MJD and integer second, and an array of
-    64-bit floating point offsets from that epoch, in seconds.
+    64-bit floating-point offsets from that epoch, in seconds.
     Necessary because Numba doesn't play well with Astropy Time objects.
     The range of offset values should be kept small to maintain precision:
     nanosecond accuracy will be lost for offsets greater than about 48 days.

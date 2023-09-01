@@ -1,6 +1,21 @@
 import numba as nb
 from numba.experimental import jitclass
 
+@nb.njit
+def polyval_numba(x, c):
+    """
+    Evaluate the polynomial c[0] + c[1]*x + ... + c[n]*x**n at the point x.
+    Equivalent to `numpy.polynomial.polynomial.polyval(x, c)`, except that:
+     - this function does not broadcast over x
+     - this function can be called directly from JIT compiled Numba code.
+    """
+    y = 0
+    i = c.size - 1
+    while i >= 0:
+        y = x*y + c[i]
+        i -= 1
+    return y
+
 @jitclass([('F0', nb.float64)])
 class FreqOnlyPredictor:
     def __init__(self, F0):
