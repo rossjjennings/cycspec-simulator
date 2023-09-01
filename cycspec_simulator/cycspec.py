@@ -105,7 +105,7 @@ def pspec_ryan4(data, nchan, nbin, phase_predictor):
         pspec_CI,
         data.feed_poln,
     )
-    freq = np.fft.fftshift(np.fft.fftfreq(nchan, 1/data.bandwidth))
+    freq = data.obsfreq + np.fft.fftshift(np.fft.fftfreq(nchan, 1/data.bandwidth))
     pspec = PeriodicSpectrum(freq, I, Q, U, V)
     return pspec
 
@@ -151,7 +151,7 @@ def pspec_corrfirst(data, nchan, nbin, phase_predictor):
         pspec_CI,
         data.feed_poln,
     )
-    freq = np.fft.fftshift(np.fft.fftfreq(nchan, 1/data.bandwidth))
+    freq = data.obsfreq + np.fft.fftshift(np.fft.fftfreq(nchan, 1/data.bandwidth))
     pspec = PeriodicSpectrum(freq, I, Q, U, V)
     return pspec
 
@@ -203,6 +203,6 @@ def pspec_numba(data, nchan, nbin, phase_predictor, use_midpt=True, round_to_nea
         pspec_CI,
         data.feed_poln,
     )
-    freq = np.fft.fftshift(np.fft.fftfreq(nchan, 1/data.bandwidth))
+    freq = data.obsfreq + np.fft.fftshift(np.fft.fftfreq(nchan, 1/data.bandwidth))
     pspec = PeriodicSpectrum(freq, I, Q, U, V)
     return pspec
