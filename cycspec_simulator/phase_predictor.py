@@ -1,6 +1,5 @@
 import numba as nb
-from numba.experimental import jitclass
-from .time import Time, time_type
+from .time import Time
 
 @nb.njit
 def polyval_numba(x, c):
@@ -17,10 +16,7 @@ def polyval_numba(x, c):
         i -= 1
     return y
 
-@jitclass([
-    ('f0', nb.float64),
-    ('epoch', time_type),
-])
+
 class FreqOnlyPredictor:
     def __init__(self, f0, epoch):
         self.f0 = f0
@@ -29,19 +25,7 @@ class FreqOnlyPredictor:
     def phase(self, t):
         return self.f0*t.diff(self.epoch)
 
-@jitclass([
-    ('span', nb.int64),
-    ('site', nb.types.unicode_type),
-    ('ref_freq', nb.float64),
-    ('ref_mjd', nb.float64),
-    ('ref_phase', nb.float64),
-    ('ref_f0', nb.float64),
-    ('coeffs', nb.float64[:]),
-    ('start_phase', nb.float64),
-    ('date_produced', nb.types.unicode_type),
-    ('version', nb.types.unicode_type),
-    ('log10_fit_err', nb.float64),
-])
+
 class PolynomialPredictor:
     def __init__(self, span, site, ref_freq, ref_mjd, ref_phase, ref_f0, coeffs,
                  start_phase=0., date_produced='', version='', log10_fit_err=0.):
@@ -135,4 +119,3 @@ class PolynomialPredictor:
 
         dt = (t - self.ref_mjd)*1440 # minutes
         return dt
-
