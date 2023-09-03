@@ -2,6 +2,7 @@ import numpy as np
 import numba as nb
 from numba.experimental import jitclass
 from .interpolation import fft_interp, lerp
+from .time import Time, TimeSequence, time_type, time_sequence_type
 
 class BasebandModel:
     def __init__(self, template, bandwidth, predictor, obsfreq=0,
@@ -34,21 +35,29 @@ class BasebandModel:
         else:
             self.rng = rng
 
-    def sample(self, n_samples, t_start=0, interp=lerp):
+    def sample(self, n_samples, t_start=None, interp=lerp):
         """
         Simulate a given number of samples from the modeled baseband time series.
 
         Parameters
         ----------
         n_samples: The number of samples to use.
-        phase_start: Phase of the first sample (in cycles).
+        t_start: Time of the first sample, as a Time object. If `None`,
+                 the predictor epoch will be used.
         interp: Interpolation function to use. Should take two parameters,
                 a template array and an array of sample points at which to
                 evaluate the interpolated function (extended periodically).
                 `fft_interp` and `lerp` (the default) both work.
         """
+        if t_start is None:
+            t_start = self.predictor.epoch
+
         t_span = n_samples/self.bandwidth
-        t = np.linspace(t_start, t_start + t_span, n_samples, endpoint=False)
+        t = TimeSequence(
+            t_start.mjd,
+            t_start.second,
+            t_start.offset + np.linspace(0, t_span, n_samples, endpoint=False),
+        )
         phase = self.predictor.phase(t)
         binno = phase*self.template.nbin
         I = interp(self.template.I, binno)
@@ -105,7 +114,7 @@ class BasebandModel:
         return sample(n_samples, phase_start, interp)
 
 @jitclass([
-    ('t', nb.float64[:]),
+    ('t', time_sequence_type),
     ('A', nb.complex128[:]),
     ('B', nb.complex128[:]),
     ('feed_poln', nb.types.unicode_type),
