@@ -1,5 +1,6 @@
 import numba as nb
 from numba.experimental import jitclass
+from .time import Time, time_type
 
 @nb.njit
 def polyval_numba(x, c):
@@ -18,16 +19,15 @@ def polyval_numba(x, c):
 
 @jitclass([
     ('f0', nb.float64),
-    ('epoch_mjd', nb.int32),
-    ('epoch_sec', nb.int32),
-    ('epoch_offset', nb.float64),
+    ('epoch', time_type),
 ])
 class FreqOnlyPredictor:
-    def __init__(self, f0):
+    def __init__(self, f0, epoch):
         self.f0 = f0
+        self.epoch = epoch
 
     def phase(self, t):
-        return self.f0*t
+        return self.f0*t.diff(self.epoch)
 
 @jitclass([
     ('span', nb.int64),
