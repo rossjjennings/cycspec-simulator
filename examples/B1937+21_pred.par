@@ -1,0 +1,53 @@
+# Created: 2023-07-12T00:39:19.516951
+# PINT_version: 0.9.3
+# User: jovyan
+# Host: f23835b8d2b9
+# OS: Linux-4.18.0-425.13.1.el8_7.x86_64-x86_64-with-glibc2.31
+# Format: tempo
+PSR                              B1937+21
+EPHEM                               DE440
+CLK                              TT(BIPM)
+UNITS                                 TDB
+START              57977.1274958450568287
+FINISH             59065.1290488744371180
+TIMEEPH                              FB90
+T2CMETHOD                        IAU2000B
+DILATEFREQ                              N
+DMDATA          0
+NTOA                                 5730
+ELONG                 301.973244484302029 0 0.00000000388241803886
+ELAT                   42.296752077547630 0 0.00000000420223660466
+PMELONG             -0.027269434362946144 0 0.0024535915200326144
+PMELAT                -0.4082297110287356 0 0.003608549234423484
+PX                     0.2668867212161056 0 0.03081061022934958
+ECL                              IERS2010
+POSEPOCH           56166.0000000000000000
+F0                    641.928230172690894 1 5.4191670944612519707e-14
+F1              -4.3308491119290706172e-14 0 4.7032073819334245006e-20
+PEPOCH             56166.0000000000000000
+PLANET_SHAPIRO                          N
+DM                   71.01596245437614326 1 3.7166509835768680736e-06
+DM1                                   0.0
+DMEPOCH            56166.0000000000000000
+TZRMJD             55616.4178018924963079
+TZRSITE                                GB
+TZRFRQ                           1742.942
+JUMP            -fe Rcvr_800   -1.4457116772603223e-05 1 2.2742360217869694e-08
+JUMP            -fe L-wide    -2.233949412492956e-06 1 1.0180372117425634e-08
+JUMP            -fe Rcvr1_2   -1.1786653455294244e-05 1 1.00147101349146e-08
+T2EFAC          -f L-wide_ASP        2.5842365838958523
+T2EQUAD         -f L-wide_ASP      0.057509709535471853
+T2EFAC          -f L-wide_PUPPI        1.5885536155488553
+T2EFAC          -f Rcvr1_2_GASP         1.115962380348399
+T2EFAC          -f Rcvr1_2_GUPPI        1.2012315036431656
+T2EFAC          -f Rcvr_800_GASP         2.540289848920312
+T2EFAC          -f Rcvr_800_GUPPI        3.9740713595462607
+T2EFAC          -f S-wide_ASP        1.2961479763169295
+T2EFAC          -f S-wide_PUPPI        1.1163297344750174
+T2EQUAD         -f L-wide_PUPPI       0.04822608202327241
+T2EQUAD         -f Rcvr1_2_GASP       0.08354928776953091
+T2EQUAD         -f Rcvr1_2_GUPPI      0.057672154450042167
+T2EQUAD         -f Rcvr_800_GASP       0.07909930219722942
+T2EQUAD         -f Rcvr_800_GUPPI        0.0636496986184171
+T2EQUAD         -f S-wide_ASP       0.09447468020867167
+T2EQUAD         -f S-wide_PUPPI        0.0675635414687781

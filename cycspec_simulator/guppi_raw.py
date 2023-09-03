@@ -149,7 +149,7 @@ def write(filename, data, header, blocsize=None, overlap=0, out_dtype=np.int8, a
     nchan = 1
     nbytes = np.dtype(out_dtype).itemsize
     if blocsize is None:
-        datasize = data.t.shape[0]*nchan*2*2*nbytes
+        datasize = data.A.shape[0]*nchan*2*2*nbytes
         blocsize = datasize
 
     header['NPOL'] = '4'
