@@ -38,9 +38,12 @@ leapsec_mjds = np.array([
 
 class Time:
     """
-    A one-dimensional array of time values, represented as an epoch,
+    A one-dimensional array of UTC time values, represented as an epoch,
     specified by an integer MJD and integer second, and a 64-bit
     floating-point offset from that epoch, in seconds.
+    Leap seconds are handled correctly for dates from 1972 through the
+    next leap second after 2016-12-31T23:59:60. Future dates are handled
+    assuming that no additional leap seconds will be inserted or removed.
     """
     def __init__(self, mjd, second, offset):
         """
@@ -56,6 +59,8 @@ class Time:
                 To maintain nanosecond accuracy, should be kept to less than
                 2**22 seconds (48.5 days).
         """
+        if second > 86400 or (second == 86400 and mjd not in leapsec_mjds):
+            raise ValueError(f"Second {second} is beyond end of day {mjd}")
         self.mjd = mjd
         self.second = second
         self.offset = offset
@@ -64,8 +69,34 @@ class Time:
         return Time(self.mjd, self.second, self.offset[sl])
 
     def __sub__(self, other):
+        """
+        Subtract two Time objects and produce a difference in seconds.
+        """
         mjd_diff = self.mjd - other.mjd
         second_diff = 86400*mjd_diff + self.second - other.second
         second_diff += np.sum((leapsec_mjds >= other.mjd) & (leapsec_mjds < self.mjd))
         second_diff += self.offset - other.offset
         return second_diff
+
+    @classmethod
+    def from_mjd(cls, mjd, smear_leapsec=False):
+        """
+        Create a time object from a fractional MJD.
+        The fractional part of the MJD is treated as (# of seconds)/86400
+        unless the specified day includes a leap second _and_ `smear_leapsec`
+        is `True`, in which case it is treated as (# of seconds)/86401.
+
+        Setting `smear_leapsec=False` is consistent with TEMPO, Tempo2, and
+        PINT's `PulsarMJD`, while `smear_leapsec=True` is consistent with
+        IAU SOFA and is the default behavior of Astropy. For context, see
+        https://github.com/astropy/astropy/issues/5369.
+        """
+        frac, mjd = np.modf(mjd)
+        mjd = int(mjd)
+        if smear_leapsec and mjd in leapsec_mjds:
+            second = 86401*frac
+        else:
+            second = 86400*frac
+        frac, second = np.modf(second)
+        second = int(second)
+        return cls(mjd, second, frac)

@@ -1,21 +1,8 @@
+import numpy as np
+from numpy.polynomial import polynomial
 import numba as nb
+
 from .time import Time
-
-@nb.njit
-def polyval_numba(x, c):
-    """
-    Evaluate the polynomial c[0] + c[1]*x + ... + c[n]*x**n at the point x.
-    Equivalent to `numpy.polynomial.polynomial.polyval(x, c)`, except that:
-     - this function does not broadcast over x
-     - this function can be called directly from JIT compiled Numba code.
-    """
-    y = 0
-    i = c.size - 1
-    while i >= 0:
-        y = x*y + c[i]
-        i -= 1
-    return y
-
 
 class FreqOnlyPredictor:
     def __init__(self, f0, epoch):
@@ -25,29 +12,28 @@ class FreqOnlyPredictor:
     def phase(self, t):
         return self.f0*(t - self.epoch)
 
-
 class PolynomialPredictor:
-    def __init__(self, span, site, ref_freq, ref_mjd, ref_phase, ref_f0, coeffs,
+    def __init__(self, span, site, epoch, ref_freq, ref_phase, ref_f0, coeffs,
                  start_phase=0., date_produced='', version='', log10_fit_err=0.):
         self.date_produced = date_produced
         self.version = version
         self.span = span
         self.site = site
+        self.epoch = epoch
         self.ref_freq = ref_freq
         self.start_phase = start_phase
-        self.ref_mjd = ref_mjd
         self.ref_phase = ref_phase
         self.ref_f0 = ref_f0
         self.log10_fit_err = log10_fit_err
         self.coeffs = coeffs
 
-    @staticmethod
-    def from_record(rec):
-        return PolynomialPredictor(
+    @classmethod
+    def from_record(cls, rec):
+        return cls(
             span = rec['NSPAN'],
             site = rec['NSITE'],
+            epoch = Time.from_mjd(rec['REF_MJD']),
             ref_freq = rec['REF_FREQ'],
-            ref_mjd = rec['REF_MJD'],
             ref_phase = rec['REF_PHS'],
             ref_f0 = rec['REF_F0'],
             coeffs = rec['COEFF'],
@@ -57,8 +43,15 @@ class PolynomialPredictor:
             log10_fit_err = rec['LGFITERR'],
         )
 
-    @staticmethod
-    def parse(lines):
+    @classmethod
+    def from_file(cls, filename):
+        with open(filename, 'r') as f:
+            lines = f.readlines()
+            predictor, *others = cls.parse(lines)
+        return predictor
+
+    @classmethod
+    def parse(cls, lines):
         i = 0
         polycos = []
         while i < len(lines):
@@ -76,11 +69,11 @@ class PolynomialPredictor:
                 coeffs.extend([float(part.replace('D', 'E')) for part in lines[i + j].split()])
                 j += 1
             i += j
-            polycos.append(PolynomialPredictor(
+            polycos.append(cls(
                 span=int(span),
                 site=site,
+                epoch=Time.from_mjd(float(ref_mjd)),
                 ref_freq=float(ref_freq),
-                ref_mjd=float(ref_mjd),
                 ref_phase=float(ref_phase),
                 ref_f0=float(ref_f0),
                 coeffs=np.array(coeffs),
@@ -112,10 +105,8 @@ class PolynomialPredictor:
         return f0
 
     def dt(self, t, check_bounds=True):
-        mjd_start = self.ref_mjd - self.span/1440
-        mjd_end = self.ref_mjd + self.span/1440
-        if check_bounds and np.any((t < mjd_start) | (t > mjd_end)):
-            raise ValueError(f'MJD out of bounds.')
-
-        dt = (t - self.ref_mjd)*1440 # minutes
+        dt = (t - self.epoch)/60 # minutes
+        if check_bounds and np.any(np.abs(dt) > self.span/2):
+            i = np.where(np.abs(dt) > self.span/2)[0][0]
+            raise ValueError(f'Time at position {i} out of bounds.')
         return dt
