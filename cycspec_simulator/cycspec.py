@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from .interpolation import fft_roll
 from .polarization import validate_stokes, coherence_to_stokes
 from .plot_helpers import symmetrize_limits
-from .time import TimeSequence
+from .time import Time
 
 class PeriodicSpectrum:
     def __init__(self, freq, I, Q=None, U=None, V=None):
@@ -190,7 +190,7 @@ def pspec_numba(data, nchan, nbin, phase_predictor, use_midpt=True, round_to_nea
     offset = np.empty(2*data.t.offset.size - 1)
     offset[::2] = data.t.offset
     offset[1::2] = (data.t.offset[1:] + data.t.offset[:-1])/2
-    t = TimeSequence(data.t.mjd, data.t.second, offset)
+    t = Time(data.t.mjd, data.t.second, offset)
     phi = phase_predictor.phase(t)
     corr_AA, corr_AB, corr_BA, corr_BB = cycfold_numba(
         phi, data.A, data.B, nchan, nbin, use_midpt, round_to_nearest

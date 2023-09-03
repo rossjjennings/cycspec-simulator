@@ -1,7 +1,7 @@
 import numpy as np
 import numba as nb
 from .interpolation import fft_interp, lerp
-from .time import Time, TimeSequence
+from .time import Time
 
 class BasebandModel:
     def __init__(self, template, bandwidth, predictor, obsfreq=0,
@@ -52,7 +52,7 @@ class BasebandModel:
             t_start = self.predictor.epoch
 
         t_span = n_samples/self.bandwidth
-        t = TimeSequence(
+        t = Time(
             t_start.mjd,
             t_start.second,
             t_start.offset + np.linspace(0, t_span, n_samples, endpoint=False),

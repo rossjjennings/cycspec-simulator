@@ -23,7 +23,7 @@ class FreqOnlyPredictor:
         self.epoch = epoch
 
     def phase(self, t):
-        return self.f0*t.diff(self.epoch)
+        return self.f0*(t - self.epoch)
 
 
 class PolynomialPredictor:
