@@ -1,7 +1,6 @@
 import numpy as np
 import numba as nb
 import astropy.time
-from numba.experimental import jitclass
 
 # Days with leap seconds. Current through at least 2024-06-28.
 # For updates, see https://hpiers.obspm.fr/iers/bul/bulc/Leap_Second.dat
@@ -37,11 +36,7 @@ leapsec_mjds = np.array([
     57753, # 2016-12-31
 ])
 
-@jitclass([
-    ('mjd', nb.int32),
-    ('second', nb.int32),
-    ('offset', nb.float64),
-])
+
 class Time:
     """
     A one-dimensional array of time values, represented as an epoch,
@@ -78,11 +73,7 @@ class Time:
         second_diff += self.offset - other.offset
         return second_diff
 
-@jitclass([
-    ('mjd', nb.int32),
-    ('second', nb.int32),
-    ('offset', nb.float64[:]),
-])
+
 class TimeSequence:
     """
     A one-dimensional array of time values, represented as an epoch,
@@ -121,10 +112,5 @@ class TimeSequence:
         mjd_diff = self.mjd - other.mjd
         second_diff = 86400*mjd_diff + self.second - other.second
         #second_diff += np.sum((leapsec_mjds >= other.mjd) & (leapsec_mjds < self.mjd))
-        output_diff = np.empty_like(self.offset)
-        for i in range(self.offset.size):
-            output_diff[i] = second_diff + self.offset[i] - other.offset
-        return output_diff
-
-time_type = Time.class_type.instance_type
-time_sequence_type = TimeSequence.class_type.instance_type
+        second_diff += self.offset - other.offset
+        return second_diff

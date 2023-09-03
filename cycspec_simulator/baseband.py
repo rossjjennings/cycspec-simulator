@@ -1,8 +1,7 @@
 import numpy as np
 import numba as nb
-from numba.experimental import jitclass
 from .interpolation import fft_interp, lerp
-from .time import Time, TimeSequence, time_type, time_sequence_type
+from .time import Time, TimeSequence
 
 class BasebandModel:
     def __init__(self, template, bandwidth, predictor, obsfreq=0,
@@ -113,14 +112,7 @@ class BasebandModel:
         n_samples = np.int64(duration*self.bandwidth)
         return sample(n_samples, phase_start, interp)
 
-@jitclass([
-    ('t', time_sequence_type),
-    ('A', nb.complex128[:]),
-    ('B', nb.complex128[:]),
-    ('feed_poln', nb.types.unicode_type),
-    ('bandwidth', nb.float64),
-    ('obsfreq', nb.float64),
-])
+
 class BasebandData:
     def __init__(self, t, A, B, feed_poln, bandwidth, obsfreq):
         self.t = t
