@@ -17,6 +17,9 @@ dependencies = [
     "numba>=0.57.0",
 ]
 
+[project.scripts]
+cycspec-make-raw = "cycspec_simulator.make_raw:main"
+
 [tool.versioneer]
 VCS = "git"
 style = "pep440"
