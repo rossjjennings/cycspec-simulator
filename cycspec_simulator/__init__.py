@@ -6,6 +6,7 @@ from .interpolation import fft_roll, fft_interp, lerp
 from .cycspec import outer_correlate, pspec_ryan4, pspec_corrfirst, pspec_numba
 from .fold import fold_numba
 from .time import Time
+from .metadata import ObservingMetadata
 
 from . import _version
 __version__ = _version.get_versions()['version']

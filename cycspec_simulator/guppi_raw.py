@@ -6,6 +6,8 @@ import dask.array as da
 import os
 import numbers
 
+from .metadata import ObservingMetadata
+
 class GuppiRawHeader:
     def __init__(self, cards):
         self.cards = cards
@@ -138,25 +140,47 @@ def quantize(data, out_dtype=np.int8, autoscale=True):
         split *= 2**(nbits-1-expt)
     return (split).astype(out_dtype)
 
-def write(filename, data, header, blocsize=None, overlap=0, out_dtype=np.int8, autoscale=True):
+def write(filename, data, blocsize=None, overlap=0, out_dtype=np.int8, autoscale=True, metadata=None, **kwargs):
     """
     Write data to a GUPPI raw file.
     Currently very limited -- can only write a single frame with one channel.
     """
-    if not isinstance(header, GuppiRawHeader):
-        # assume it's a dict, or dict-like
-        header = GuppiRawHeader(header)
     nchan = 1
     nbytes = np.dtype(out_dtype).itemsize
     if blocsize is None:
         datasize = data.A.shape[0]*nchan*2*2*nbytes
         blocsize = datasize
+    if metadata is None:
+        metadata = ObservingMetadata.default()
 
-    header['NPOL'] = '4'
-    header['NBITS'] = 8*nbytes
-    header['OBSNCHAN'] = str(nchan)
-    header['BLOCSIZE'] = blocsize
-    header['OVERLAP'] = overlap
+    header = GuppiRawHeader({
+        'SRC_NAME': metadata.src_name,
+        'TELESCOP': metadata.telescope,
+        'FRONTEND': metadata.frontend,
+        'BACKEND': metadata.backend,
+        'RA_STR': metadata.ra_str,
+        'DEC_STR': metadata.dec_str,
+        'OBSERVER': metadata.observer,
+        'OBSFREQ': f'{data.obsfreq/1e6:.16g}',
+        'OBSBW': f'{data.bandwidth/1e6:.16g}',
+        'TBIN': f'{1/data.bandwidth:.16g}',
+        'STT_IMJD': data.t.mjd,
+        'STT_SMJD': data.t.second + int(data.t[0].offset),
+        'STT_OFFS': data.t[0].offset - int(data.t[0].offset),
+        'PKTIDX': 0,
+        'PKTSIZE': 8192, # just a placeholder value for now
+        'PKTFMT': '1SFA',
+        'NPOL': '4',
+        'POL_TYPE': 'AABBCRCI',
+        'FD_POLN': data.feed_poln,
+        'NBITS': 8*nbytes,
+        'OBSNCHAN': f'{nchan}',
+        'BLOCSIZE': blocsize,
+        'OVERLAP': overlap,
+    })
+
+    for key, value in kwargs.items():
+        header[key.upper()[:8]] = value
 
     quantized_data = quantize(data, out_dtype, autoscale)
 
