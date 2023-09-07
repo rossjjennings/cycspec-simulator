@@ -140,16 +140,18 @@ def quantize(data, out_dtype=np.int8, autoscale=True):
         split *= 2**(nbits-1-expt)
     return (split).astype(out_dtype)
 
-def write(filename, data, blocsize=None, overlap=0, out_dtype=np.int8, autoscale=True, metadata=None, **kwargs):
+def write(filename, data, samples_per_block=None, overlap=0, out_dtype=np.int8, autoscale=True, metadata=None, **kwargs):
     """
     Write data to a GUPPI raw file.
-    Currently very limited -- can only write a single frame with one channel.
+    Currently limited to writing a single channel.
     """
     nchan = 1
     nbytes = np.dtype(out_dtype).itemsize
-    if blocsize is None:
-        datasize = data.A.shape[0]*nchan*2*2*nbytes
-        blocsize = datasize
+    nsamples = data.A.shape[0]
+    if samples_per_block is None:
+        samples_per_block = min(2**20, nsamples//2)
+    nblocks = nsamples//samples_per_block
+    blocsize = samples_per_block*nchan*2*2*nbytes
     if metadata is None:
         metadata = ObservingMetadata.default()
 
@@ -185,7 +187,12 @@ def write(filename, data, blocsize=None, overlap=0, out_dtype=np.int8, autoscale
     quantized_data = quantize(data, out_dtype, autoscale)
 
     with open(filename, 'wb') as fh:
-        for card in header.cards_as_bytes():
-            fh.write(card)
-        fh.write(b"END" + b" "*77)
-        fh.write(quantized_data.tobytes())
+        for iblock in range(nblocks):
+            for card in header.cards_as_bytes():
+                fh.write(card)
+            fh.write(b"END" + b" "*77)
+            start = iblock*samples_per_block
+            end = (iblock + 1)*samples_per_block
+            if end > nsamples:
+                end = nsamples
+            fh.write(quantized_data[start:end].tobytes())
