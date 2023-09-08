@@ -4,7 +4,7 @@ from .interpolation import fft_interp, lerp
 from .time import Time
 
 class BasebandModel:
-    def __init__(self, template, bandwidth, predictor, obsfreq=0,
+    def __init__(self, template, predictor, chan_bw, nchan=1, obsfreq=0,
                  noise_level=0, feed_poln='LIN', rng=None):
         """
         Create a new model for generating simulated baseband data.
@@ -12,11 +12,11 @@ class BasebandModel:
         Parameters
         ----------
         template: TemplateProfile object representing the pulse profile.
-        bandwidth: Bandwidth of simulated data (same units as `pulse_freq`).
         predictor: Pulse phase predictor.
+        chan_bw: Channel bandwidth of simulated data (same units as `pulse_freq`).
+        nchan: Number of channels in simulated data.
         obsfreq: Observing frequency (used in plotting and headers only, same
-                 units
-                 as `bandwidth`).
+                 units as `chan_bw`).
         noise_level: Noise variance in intensity units.
         feed_poln: Feed polarization ('LIN' for linear or 'CIRC' for circular).
         rng: Random number generator. Expected to be a `np.random.Generator`.
@@ -24,8 +24,9 @@ class BasebandModel:
              Only the `normal()` method will ever be called.
         """
         self.template = template
-        self.bandwidth = bandwidth
         self.predictor = predictor
+        self.chan_bw = chan_bw
+        self.nchan = nchan
         self.obsfreq = obsfreq
         self.noise_level = noise_level
         self.feed_poln = feed_poln.upper()
@@ -51,7 +52,7 @@ class BasebandModel:
         if t_start is None:
             t_start = self.predictor.epoch
 
-        t_span = n_samples/self.bandwidth
+        t_span = n_samples/self.chan_bw
         t = Time(
             t_start.mjd,
             t_start.second,
@@ -60,16 +61,17 @@ class BasebandModel:
         phase = self.predictor.phase(t)
         binno = phase*self.template.nbin
         I = interp(self.template.I, binno)
+        shape = (self.nchan, n_samples)
         noise1 = (
-            (self.rng.normal(size=n_samples) + 1j*self.rng.normal(size=n_samples))
+            (self.rng.normal(size=shape) + 1j*self.rng.normal(size=shape))
             /np.sqrt(2)
         )
         noise2 = (
-            (self.rng.normal(size=n_samples) + 1j*self.rng.normal(size=n_samples))
+            (self.rng.normal(size=shape) + 1j*self.rng.normal(size=shape))
             /np.sqrt(2)
         )
         noise3 = (
-            (self.rng.normal(size=n_samples) + 1j*self.rng.normal(size=n_samples))
+            (self.rng.normal(size=shape) + 1j*self.rng.normal(size=shape))
             /np.sqrt(2)
         )
         if self.template.full_stokes:
@@ -81,19 +83,19 @@ class BasebandModel:
                 Y = (U - 1j*V)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
                 Y /= np.sqrt(2*(I + Q))
                 Y += np.sqrt(self.noise_level)*noise3
-                return BasebandData(t, X, Y, 'LIN', self.bandwidth, self.obsfreq)
+                return BasebandData(t, X, Y, 'LIN', self.chan_bw, self.obsfreq)
             elif self.feed_poln == 'CIRC':
                 L = np.sqrt((I + V)/2)*noise1 + np.sqrt(self.noise_level)*noise3
                 R = (Q - 1j*U)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
                 R /= np.sqrt(2*(I + V))
                 R += np.sqrt(self.noise_level)*noise3
-                return BasebandData(t, L, R, 'CIRC', self.bandwidth, self.obsfreq)
+                return BasebandData(t, L, R, 'CIRC', self.chan_bw, self.obsfreq)
             else:
                 raise ValueError(f"Invalid polarization type '{self.feed_poln}'.")
         else:
             A = np.sqrt(I/2)*noise1 + np.sqrt(self.noise_level)*noise3
             B = np.sqrt(I/2)*noise2 + np.sqrt(self.noise_level)*noise3
-            return BasebandData(t, A, B, self.feed_poln, self.bandwidth, self.obsfreq)
+            return BasebandData(t, A, B, self.feed_poln, self.chan_bw, self.obsfreq)
         return X, Y
 
     def sample_time(self, duration, phase_start=0, interp=lerp):
@@ -109,15 +111,23 @@ class BasebandModel:
                 evaluate the interpolated function (extended periodically).
                 `fft_interp` and `lerp` (the default) both work.
         """
-        n_samples = np.int64(duration*self.bandwidth)
+        n_samples = np.int64(duration*self.chan_bw)
         return sample(n_samples, phase_start, interp)
 
 
 class BasebandData:
-    def __init__(self, t, A, B, feed_poln, bandwidth, obsfreq):
+    def __init__(self, t, A, B, feed_poln, chan_bw, obsfreq):
         self.t = t
         self.A = A
         self.B = B
         self.feed_poln = feed_poln.upper()
-        self.bandwidth = bandwidth
+        self.chan_bw = chan_bw
         self.obsfreq = obsfreq
+
+    @property
+    def nchan(self):
+        return self.A.shape[0]
+
+    @property
+    def n_samples(self):
+        return self.A.shape[1]

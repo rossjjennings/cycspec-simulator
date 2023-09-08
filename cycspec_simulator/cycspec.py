@@ -186,21 +186,32 @@ def cycfold_numba(phi, A, B, nchan, nbin, use_midpt=True, round_to_nearest=True)
     corr_BB /= samples
     return corr_AA, corr_AB, corr_BA, corr_BB
 
-def pspec_numba(data, nchan, nbin, phase_predictor, use_midpt=True, round_to_nearest=True):
+def pspec_numba(data, ncyc, nbin, phase_predictor, use_midpt=True, round_to_nearest=True):
     offset = np.empty(2*data.t.offset.size - 1)
     offset[::2] = data.t.offset
     offset[1::2] = (data.t.offset[1:] + data.t.offset[:-1])/2
     t = Time(data.t.mjd, data.t.second, offset)
     phi = phase_predictor.phase(t)
-    corr_AA, corr_AB, corr_BA, corr_BB = cycfold_numba(
-        phi, data.A, data.B, nchan, nbin, use_midpt, round_to_nearest
-    )
-    corr_CR = (corr_AB + corr_BA)/2
-    corr_CI = (corr_AB - corr_BA)/2j
-    pspec_AA = np.fft.fftshift(np.fft.hfft(corr_AA, axis=0), axes=0)
-    pspec_BB = np.fft.fftshift(np.fft.hfft(corr_BB, axis=0), axes=0)
-    pspec_CR = np.fft.fftshift(np.fft.hfft(corr_CR, axis=0), axes=0)
-    pspec_CI = np.fft.fftshift(np.fft.hfft(corr_CI, axis=0), axes=0)
+    pspec_shape = (data.nchan*ncyc, nbin)
+    pspec_AA = np.empty(pspec_shape, dtype=np.float64)
+    pspec_BB = np.empty(pspec_shape, dtype=np.float64)
+    pspec_CR = np.empty(pspec_shape, dtype=np.float64)
+    pspec_CI = np.empty(pspec_shape, dtype=np.float64)
+    freq = np.empty(data.nchan*ncyc, dtype=np.float64)
+    for ichan in range(data.nchan):
+        corr_AA, corr_AB, corr_BA, corr_BB = cycfold_numba(
+            phi, data.A[ichan], data.B[ichan], ncyc, nbin, use_midpt, round_to_nearest
+        )
+        corr_CR = (corr_AB + corr_BA)/2
+        corr_CI = (corr_AB - corr_BA)/2j
+        pspec_AA[ichan*ncyc:(ichan+1)*ncyc] = np.fft.fftshift(np.fft.hfft(corr_AA, axis=0), axes=0)
+        pspec_BB[ichan*ncyc:(ichan+1)*ncyc] = np.fft.fftshift(np.fft.hfft(corr_BB, axis=0), axes=0)
+        pspec_CR[ichan*ncyc:(ichan+1)*ncyc] = np.fft.fftshift(np.fft.hfft(corr_CR, axis=0), axes=0)
+        pspec_CI[ichan*ncyc:(ichan+1)*ncyc] = np.fft.fftshift(np.fft.hfft(corr_CI, axis=0), axes=0)
+        chan_midfreq = data.obsfreq + (ichan + 1/2 - data.nchan/2)*data.chan_bw
+        freq[ichan*ncyc:(ichan+1)*ncyc] = (
+            chan_midfreq + np.fft.fftshift(np.fft.fftfreq(ncyc, 1/data.chan_bw))
+        )
 
     I, Q, U, V = coherence_to_stokes(
         pspec_AA,
@@ -209,6 +220,5 @@ def pspec_numba(data, nchan, nbin, phase_predictor, use_midpt=True, round_to_nea
         pspec_CI,
         data.feed_poln,
     )
-    freq = data.obsfreq + np.fft.fftshift(np.fft.fftfreq(nchan, 1/data.bandwidth))
     pspec = PeriodicSpectrum(freq, I, Q, U, V)
     return pspec
