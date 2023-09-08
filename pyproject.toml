@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cycspec-simulator"
-version = "0.1.0"
+dynamic = ["version"]
 authors = [
     {name = "Ross Jennings", email = "ross.jennings@nanograv.org"},
 ]
