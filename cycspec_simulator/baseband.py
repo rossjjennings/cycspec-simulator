@@ -1,5 +1,7 @@
 import numpy as np
 import numba as nb
+import dask.array as da
+
 from .interpolation import fft_interp, lerp
 from .time import Time
 
@@ -51,12 +53,8 @@ class BasebandModel:
         if t_start is None:
             t_start = self.predictor.epoch
 
-        t_span = n_samples/self.bandwidth
-        t = Time(
-            t_start.mjd,
-            t_start.second,
-            t_start.offset + np.linspace(0, t_span, n_samples, endpoint=False),
-        )
+        delayed = isinstance(self.rng, da.random.Generator)
+        t = get_time_axis(t_start, n_samples, self.bandwidth, delayed=delayed)
         phase = self.predictor.phase(t)
         binno = phase*self.template.nbin
         I = interp(self.template.I, binno)
@@ -81,19 +79,19 @@ class BasebandModel:
                 Y = (U - 1j*V)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
                 Y /= np.sqrt(2*(I + Q))
                 Y += np.sqrt(self.noise_level)*noise3
-                return BasebandData(t, X, Y, 'LIN', self.bandwidth, self.obsfreq)
+                return BasebandData(X, Y, t_start, 'LIN', self.bandwidth, self.obsfreq)
             elif self.feed_poln == 'CIRC':
                 L = np.sqrt((I + V)/2)*noise1 + np.sqrt(self.noise_level)*noise3
                 R = (Q - 1j*U)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
                 R /= np.sqrt(2*(I + V))
                 R += np.sqrt(self.noise_level)*noise3
-                return BasebandData(t, L, R, 'CIRC', self.bandwidth, self.obsfreq)
+                return BasebandData(L, R, t_start, 'CIRC', self.bandwidth, self.obsfreq)
             else:
                 raise ValueError(f"Invalid polarization type '{self.feed_poln}'.")
         else:
             A = np.sqrt(I/2)*noise1 + np.sqrt(self.noise_level)*noise3
             B = np.sqrt(I/2)*noise2 + np.sqrt(self.noise_level)*noise3
-            return BasebandData(t, A, B, self.feed_poln, self.bandwidth, self.obsfreq)
+            return BasebandData(A, B, t_start, self.feed_poln, self.bandwidth, self.obsfreq)
         return X, Y
 
     def sample_time(self, duration, phase_start=0, interp=lerp):
@@ -112,12 +110,44 @@ class BasebandModel:
         n_samples = np.int64(duration*self.bandwidth)
         return sample(n_samples, phase_start, interp)
 
+def get_time_axis(start_time, n_samples, bandwidth, delayed=False):
+    if delayed:
+        linspace = da.linspace
+    else:
+        linspace = np.linspace
+    t_span = n_samples/bandwidth
+    return Time(
+        start_time.mjd,
+        start_time.second,
+        start_time.offset + linspace(0, t_span, n_samples, endpoint=False),
+    )
 
 class BasebandData:
-    def __init__(self, t, A, B, feed_poln, bandwidth, obsfreq):
-        self.t = t
+    def __init__(self, A, B, start_time, feed_poln, bandwidth, obsfreq):
+        if not B.shape == A.shape:
+            raise ValueError(f"A and B should be the same shape! Found: {A.shape} != {B.shape}")
         self.A = A
         self.B = B
+        self.n_samples = self.A.shape[-1]
+        self.delayed = isinstance(A, da.Array)
+        self.start_time = start_time
         self.feed_poln = feed_poln.upper()
         self.bandwidth = bandwidth
         self.obsfreq = obsfreq
+
+    @property
+    def t(self):
+        return get_time_axis(self.start_time, self.n_samples, self.bandwidth, self.delayed)
+
+    def compute_all(self):
+        if self.delayed:
+            return BasebandDataBlock(
+                self.A.compute(),
+                self.B.compute(),
+                self.start_time,
+                self.feed_poln,
+                self.bandwidth,
+                self.obsfreq,
+            )
+        else:
+            return self

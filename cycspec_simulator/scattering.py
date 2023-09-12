@@ -103,9 +103,9 @@ class ScintillationPattern:
         equal to one less than `self.n_samples`.
         """
         return BasebandData(
-            data.t[self.n_samples - 1:],
             convolve(data.A, self.impulse_response, mode='valid'),
             convolve(data.B, self.impulse_response, mode='valid'),
+            data.t[self.n_samples - 1],
             data.feed_poln,
             data.bandwidth,
             data.obsfreq,

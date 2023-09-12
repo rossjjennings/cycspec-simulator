@@ -1,4 +1,5 @@
 import numpy as np
+import dask.array as da
 
 def fft_roll(arr, shift):
     """
@@ -10,7 +11,9 @@ def fft_roll(arr, shift):
     If the array has more than one axis, the last axis is shifted.
     """
     n = arr.shape[-1]
-    shift = np.asanyarray(shift)[..., np.newaxis]
+    if not hasattr(shift, 'shape'):
+        shift = np.array(shift)
+    shift = shift[..., np.newaxis]
     phase = -2j*np.pi*shift*np.fft.rfftfreq(n)
     return np.fft.irfft(np.fft.rfft(arr)*np.exp(phase), n)
 
@@ -21,7 +24,8 @@ def fft_interp(arr, x):
     associated with the DFT of `arr` to define a continuous function.
     """
     n = arr.shape[-1]
-    x = np.asanyarray(x)
+    if not hasattr(x, 'shape'):
+        x = np.array(x)
     phase = 2j*np.pi*x[..., np.newaxis]*np.fft.fftfreq(n)
     return np.mean(np.fft.fft(arr)*np.exp(phase), axis=-1)[()]
 
@@ -32,13 +36,14 @@ def lerp(arr, x):
     periodically.
     """
     n = arr.shape[-1]
-    x = np.asanyarray(x)
+    if not hasattr(x, 'shape'):
+        x = np.array(x)
     floor = np.floor(x)
     t = x - floor
     pre_idx = floor.astype(np.int64) % n
     post_idx = np.ceil(x).astype(np.int64) % n
-    pre_val = arr[pre_idx]
-    post_val = arr[post_idx]
+    pre_val = da.take(arr, pre_idx)
+    post_val = da.take(arr, post_idx)
     interp_val = (1-t)*pre_val + t*post_val
 
     return interp_val[()]
