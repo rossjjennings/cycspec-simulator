@@ -8,14 +8,14 @@ dynamic = ["version"]
 authors = [
     {name = "Ross Jennings", email = "ross.jennings@nanograv.org"},
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.9" # required by numba 0.57
 dependencies = [
-    "numpy>=1.21.6",
-    "scipy>=1.5.3",
-    "matplotlib>=3.3.3",
-    "astropy>=4.0.4",
-    "numba>=0.57.0",
-    "dask>=2023.2.1",
+    "numpy>=1.21.6", # required by numba 0.57
+    "scipy>=1.5.3", # any python 3.9 compatibile version
+    "matplotlib>=3.3.3", # any python 3.9 compatibile version
+    "astropy>=4.0.4", # any python 3.9 compatibile version
+    "numba>=0.57.0", # nopython mode features needed for fold_numba()
+    "dask>=2023.2.1", # dask.array.random.default_rng()
 ]
 
 [project.scripts]
