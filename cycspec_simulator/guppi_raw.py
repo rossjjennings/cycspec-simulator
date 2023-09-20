@@ -140,18 +140,17 @@ def quantize(data, out_dtype=np.int8, autoscale=True):
         split *= 2**(nbits-1-expt)
     return (split).astype(out_dtype)
 
-def write(filename, data, samples_per_block=None, overlap=0, out_dtype=np.int8, autoscale=True, metadata=None, **kwargs):
+def write(filename, data, samples_per_block=None, pktsize=8192, overlap=0, out_dtype=np.int8, autoscale=True, metadata=None, **kwargs):
     """
     Write data to a GUPPI raw file.
     Currently limited to writing a single channel.
     """
-    nchan = 1
     nbytes = np.dtype(out_dtype).itemsize
-    nsamples = data.A.shape[0]
+    nsamples = data.n_samples
     if samples_per_block is None:
         samples_per_block = min(2**20, nsamples//2)
     nblocks = nsamples//samples_per_block
-    blocsize = samples_per_block*nchan*2*2*nbytes
+    blocsize = (samples_per_block + overlap)*data.nchan*2*2*nbytes
     if metadata is None:
         metadata = ObservingMetadata.default()
 
@@ -164,19 +163,19 @@ def write(filename, data, samples_per_block=None, overlap=0, out_dtype=np.int8, 
         'DEC_STR': metadata.dec_str,
         'OBSERVER': metadata.observer,
         'OBSFREQ': f'{data.obsfreq/1e6:.16g}',
-        'OBSBW': f'{data.bandwidth/1e6:.16g}',
-        'TBIN': f'{1/data.bandwidth:.16g}',
+        'OBSBW': f'{data.nchan*data.chan_bw/1e6:.16g}',
+        'TBIN': f'{1/data.chan_bw:.16g}',
         'STT_IMJD': data.t.mjd,
         'STT_SMJD': data.t.second + int(data.t[0].offset),
         'STT_OFFS': data.t[0].offset - int(data.t[0].offset),
         'PKTIDX': 0,
-        'PKTSIZE': 8192, # just a placeholder value for now
+        'PKTSIZE': pktsize,
         'PKTFMT': '1SFA',
         'NPOL': '4',
         'POL_TYPE': 'AABBCRCI',
         'FD_POLN': data.feed_poln,
         'NBITS': 8*nbytes,
-        'OBSNCHAN': f'{nchan}',
+        'OBSNCHAN': f'{data.nchan}',
         'BLOCSIZE': blocsize,
         'OVERLAP': overlap,
     })
@@ -188,11 +187,13 @@ def write(filename, data, samples_per_block=None, overlap=0, out_dtype=np.int8, 
 
     with open(filename, 'wb') as fh:
         for iblock in range(nblocks):
+            header['PKTIDX'] = iblock*samples_per_block*data.nchan*2*2//pktsize
+            start = iblock*samples_per_block
+            end = (iblock + 1)*samples_per_block + overlap
+            if end > nsamples:
+                end = nsamples
+                header['BLOCSIZE'] = (end - start + 1)*2*2*nbytes
             for card in header.cards_as_bytes():
                 fh.write(card)
             fh.write(b"END" + b" "*77)
-            start = iblock*samples_per_block
-            end = (iblock + 1)*samples_per_block
-            if end > nsamples:
-                end = nsamples
-            fh.write(quantized_data[start:end].tobytes())
+            fh.write(quantized_data[:,start:end].tobytes())
