@@ -5,46 +5,46 @@ from scipy.signal import convolve
 from .baseband import BasebandData
 
 class ExponentialScatteringModel:
-    def __init__(self, scattering_time, bandwidth, cutoff=15):
+    def __init__(self, scattering_time, chan_bw, cutoff=15):
         """
         Create an exponential scattering model.
 
         Parameters
         ----------
         scattering_time: The scattering time, in seconds.
-        bandwidth: Bandwidth of the data to which this model will be applied.
-                   This determines the time resolution of the impulse response.
+        chan_bw: Channel bandwidth of the data to which this model will be applied.
+                 This determines the time resolution of the impulse response.
         cutoff: Point at which the impulse response function will be cut off,
                 as a multiple of the scattering time.
         """
         self.scattering_time = scattering_time
-        self.bandwidth = bandwidth
+        self.chan_bw = chan_bw
         self.cutoff = cutoff
 
     def realize(self):
         """
         Create a realization of this scattering model (a ScintillationPattern).
         """
-        dt = 1/self.bandwidth
+        dt = 1/self.chan_bw
         n_samples = np.int64(self.cutoff*self.scattering_time/dt)
         time = np.linspace(0, n_samples*dt, n_samples, endpoint=False)
         envelope = np.exp(-time/self.scattering_time)*dt/self.scattering_time
         noise = (np.random.randn(n_samples) + 1j*np.random.randn(n_samples))/2
         impulse_response = np.sqrt(envelope)*noise
-        return ScintillationPattern(self.bandwidth, impulse_response)
+        return ScintillationPattern(self.chan_bw, impulse_response)
 
 class ScintillationPattern:
-    def __init__(self, bandwidth, impulse_response):
+    def __init__(self, sampling_freq, impulse_response):
         """
         Create a scintillation pattern from an impulse response function.
 
         Parameters
         ----------
-        bandwidth: i.e., sampling frequency of the provided impulse response data.
+        sampling_freq: sampling frequency of the provided impulse response data.
         impulse_response: Impulse response function, sampled at the given bandwidth.
         """
-        self.bandwidth = bandwidth
-        dt = 1/bandwidth
+        self.sampling_freq = sampling_freq
+        dt = 1/sampling_freq
         self.impulse_response = impulse_response
         self.n_samples = impulse_response.size
         self.time = np.linspace(0, self.n_samples*dt, self.n_samples, endpoint=False)
@@ -102,11 +102,17 @@ class ScintillationPattern:
         The returned BasebandData object will be shorter by a number of samples
         equal to one less than `self.n_samples`.
         """
+        new_shape = (data.A.shape[0], data.A.shape[1] - self.n_samples + 1)
+        A_new = np.empty(new_shape, data.A.dtype)
+        B_new = np.empty(new_shape, data.B.dtype)
+        for ichan in range(data.nchan):
+            A_new[ichan] = convolve(data.A[ichan], self.impulse_response, mode='valid')
+            B_new[ichan] = convolve(data.B[ichan], self.impulse_response, mode='valid')
         return BasebandData(
-            convolve(data.A, self.impulse_response, mode='valid'),
-            convolve(data.B, self.impulse_response, mode='valid'),
-            data.t[self.n_samples - 1],
+            A_new,
+            B_new,
+            data.start_time,
             data.feed_poln,
-            data.bandwidth,
+            data.chan_bw,
             data.obsfreq,
         )
