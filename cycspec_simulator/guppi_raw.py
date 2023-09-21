@@ -171,6 +171,7 @@ def write(filename, data, samples_per_block=None, pktsize=8192, overlap=0, out_d
         'PKTIDX': 0,
         'PKTSIZE': pktsize,
         'PKTFMT': '1SFA',
+        'NRCVR': '2',
         'NPOL': '4',
         'POL_TYPE': 'AABBCRCI',
         'FD_POLN': data.feed_poln,
@@ -192,7 +193,7 @@ def write(filename, data, samples_per_block=None, pktsize=8192, overlap=0, out_d
             end = (iblock + 1)*samples_per_block + overlap
             if end > nsamples:
                 end = nsamples
-                header['BLOCSIZE'] = (end - start + 1)*2*2*nbytes
+                header['BLOCSIZE'] = (end - start)*data.nchan*2*2*nbytes
             for card in header.cards_as_bytes():
                 fh.write(card)
             fh.write(b"END" + b" "*77)
