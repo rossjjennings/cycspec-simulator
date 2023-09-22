@@ -5,7 +5,7 @@ from scipy.signal import convolve
 from .baseband import BasebandData
 
 class ExponentialScatteringModel:
-    def __init__(self, scattering_time, chan_bw, cutoff=15):
+    def __init__(self, scattering_time, chan_bw, obsfreq=0, nchan=1, cutoff=15):
         """
         Create an exponential scattering model.
 
@@ -14,84 +14,147 @@ class ExponentialScatteringModel:
         scattering_time: The scattering time, in seconds.
         chan_bw: Channel bandwidth of the data to which this model will be applied.
                  This determines the time resolution of the impulse response.
+        nchan: Number of channels in the data to which this model will be applied.
         cutoff: Point at which the impulse response function will be cut off,
                 as a multiple of the scattering time.
         """
         self.scattering_time = scattering_time
         self.chan_bw = chan_bw
+        self.obsfreq = obsfreq
+        self.nchan = nchan
         self.cutoff = cutoff
 
     def realize(self):
         """
         Create a realization of this scattering model (a ScintillationPattern).
         """
-        dt = 1/self.chan_bw
-        n_samples = np.int64(self.cutoff*self.scattering_time/dt)
+        # generate pattern across full bandwidth
+        dt = 1/(self.nchan*self.chan_bw)
+        n_samples = self.nchan*np.int64(self.cutoff*self.scattering_time*self.chan_bw)
         time = np.linspace(0, n_samples*dt, n_samples, endpoint=False)
         envelope = np.exp(-time/self.scattering_time)*dt/self.scattering_time
         noise = (np.random.randn(n_samples) + 1j*np.random.randn(n_samples))/2
         impulse_response = np.sqrt(envelope)*noise
-        return ScintillationPattern(self.chan_bw, impulse_response)
+
+        # split into channels
+        filter_function = np.fft.fftshift(np.fft.fft(impulse_response))
+        filter_function = filter_function.reshape(self.nchan, -1)
+        impulse_response = np.fft.ifft(np.fft.ifftshift(filter_function, axes=-1), axis=-1)
+
+        return ScintillationPattern(
+            impulse_response,
+            self.chan_bw,
+            self.obsfreq,
+            self.nchan,
+        )
 
 class ScintillationPattern:
-    def __init__(self, sampling_freq, impulse_response):
+    def __init__(self, impulse_response, chan_bw, obsfreq=0, nchan=1):
         """
         Create a scintillation pattern from an impulse response function.
 
         Parameters
         ----------
-        sampling_freq: sampling frequency of the provided impulse response data.
         impulse_response: Impulse response function, sampled at the given bandwidth.
+        chan_bw: sampling frequency of the provided impulse response data.
+        nchan: number of channels in which the impulse response is given.
         """
-        self.sampling_freq = sampling_freq
-        dt = 1/sampling_freq
         self.impulse_response = impulse_response
+        self.chan_bw = chan_bw
+        self.obsfreq = obsfreq
+        self.nchan = nchan
         self.n_samples = impulse_response.size
-        self.time = np.linspace(0, self.n_samples*dt, self.n_samples, endpoint=False)
-        self.filter_function = np.fft.fftshift(np.fft.fft(impulse_response))
-        self.freq = np.fft.fftshift(np.fft.fftfreq(self.n_samples, d=dt))
+        tspan = self.n_samples/self.chan_bw
+        self.time = np.linspace(0, tspan, self.n_samples, endpoint=False)
+        self.filter_function = np.fft.fft(impulse_response, axis=-1)
+        self.filter_function = np.fft.fftshift(self.filter_function, axes=-1)
+        self.freq = np.fft.fftfreq(self.n_samples, d=1/(self.nchan*self.chan_bw))
+        self.freq = np.fft.fftshift(self.freq)
+        self.freq += self.obsfreq
+        self.freq = self.freq.reshape(self.nchan, -1)
 
-    def plot_impulse_response(self, ax=None, **kwargs):
+    def plot_impulse_response(self, ichan=None, ax=None, **kwargs):
         """
         Plot the impulse response associated with this scintillation pattern.
+
+        Parameters
+        ----------
+        ichan: Which channel to plot the IRF for. With `None`, plot the overall IRF.
+        ax: Axis on which to plot the IRF. With `None`, create a new Figure and Axis.
         """
         if ax is None:
             fig = plt.figure()
             ax = fig.add_subplot()
 
+        if ichan is None:
+            time = self.time
+            filter_function = np.fft.ifftshift(self.filter_function.flatten())
+            impulse_response = np.fft.ifft(filter_function)
+        else:
+            time = self.time[::self.nchan]
+            impulse_response = self.impulse_response[ichan]
         artists = []
-        artists.extend(ax.plot(self.time/1e-6, self.impulse_response.real, label="Real"))
-        artists.extend(ax.plot(self.time/1e-6, self.impulse_response.imag, label="Imag"))
+        artists.extend(ax.plot(time/1e-6, impulse_response.real, label="Real"))
+        artists.extend(ax.plot(time/1e-6, impulse_response.imag, label="Imag"))
         ax.legend()
         ax.set_xlabel("Time (\N{MICRO SIGN}s)")
-        ax.set_ylabel("Impulse response")
+        if ichan is None:
+            ax.set_ylabel("Impulse response")
+        else:
+            ax.set_ylabel(f"Impulse response (channel {ichan})")
         return artists
 
-    def plot_filter_function(self, ax=None, **kwargs):
+    def plot_filter_function(self, ichan=None, ax=None, **kwargs):
         """
         Plot the filter function associated with this scintillation pattern.
+
+        Parameters
+        ----------
+        ichan: Which channel to plot the filter function for.
+               With `None`, plot the filter function across the full band.
+        ax:    Axis on which to plot the filter function.
+               With `None`, create a new Figure and Axis.
         """
         if ax is None:
             fig = plt.figure()
             ax = fig.add_subplot()
 
+        if ichan is None:
+            freq = self.freq.flatten()
+            filter_function = self.filter_function.flatten()
+        else:
+            freq = self.freq[ichan]
+            filter_function = self.filter_function[ichan]
         artists = []
-        artists.extend(ax.plot(self.freq/1e6, self.filter_function.real, label="Real"))
-        artists.extend(ax.plot(self.freq/1e6, self.filter_function.imag, label="Imag"))
+        artists.extend(ax.plot(freq/1e6, filter_function.real, label="Real", **kwargs))
+        artists.extend(ax.plot(freq/1e6, filter_function.imag, label="Imag", **kwargs))
         ax.legend()
         ax.set_xlabel("Frequency (MHz)")
         ax.set_ylabel("Scattered E field")
         return artists
 
-    def plot_scattered_intensity(self, ax=None, **kwargs):
+    def plot_scattered_intensity(self, ichan=None, ax=None, **kwargs):
         """
-        Plot the filter function associated with this scintillation pattern.
+        Plot the scattered intensity associated with this scintillation pattern.
+
+        Parameters
+        ----------
+        ichan: Which channel to plot the scattered intensity for.
+               With `None`, plot the scattered intensity across the full band.
+        ax:    Axis on which to plot the scattered intensity.
+               With `None`, create a new Figure and Axis.
         """
         if ax is None:
             fig = plt.figure()
             ax = fig.add_subplot()
 
-        artists = ax.plot(self.freq/1e6, np.abs(self.filter_function)**2)
+        if ichan is None:
+            freq = self.freq.flatten()
+            filter_function = self.filter_function.flatten()
+        else:
+            freq = self.freq[ichan]
+            filter_function = self.filter_function[ichan]
+        artists = ax.plot(freq/1e6, np.abs(filter_function)**2, **kwargs)
         ax.set_xlabel("Frequency (MHz)")
         ax.set_ylabel("Scattered intensity")
         return artists
@@ -106,8 +169,8 @@ class ScintillationPattern:
         A_new = np.empty(new_shape, data.A.dtype)
         B_new = np.empty(new_shape, data.B.dtype)
         for ichan in range(data.nchan):
-            A_new[ichan] = convolve(data.A[ichan], self.impulse_response, mode='valid')
-            B_new[ichan] = convolve(data.B[ichan], self.impulse_response, mode='valid')
+            A_new[ichan] = convolve(data.A[ichan], self.impulse_response[ichan], mode='valid')
+            B_new[ichan] = convolve(data.B[ichan], self.impulse_response[ichan], mode='valid')
         return BasebandData(
             A_new,
             B_new,
