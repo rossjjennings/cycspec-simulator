@@ -5,6 +5,7 @@ import dask
 import dask.array as da
 import os
 import numbers
+import warnings
 
 from .metadata import ObservingMetadata
 
@@ -148,9 +149,9 @@ def write(filename, data, samples_per_block=None, pktsize=8192, overlap=0, out_d
     nbytes = np.dtype(out_dtype).itemsize
     nsamples = data.n_samples
     if samples_per_block is None:
+        # write at least 2 blocks, otherwise DSPSR will have a hard time
         samples_per_block = min(2**20, nsamples//2)
-    nblocks = nsamples//samples_per_block
-    blocsize = (samples_per_block + overlap)*data.nchan*2*2*nbytes
+    nblocks = int(np.ceil((nsamples - overlap)/samples_per_block))
     if metadata is None:
         metadata = ObservingMetadata.default()
 
@@ -188,12 +189,16 @@ def write(filename, data, samples_per_block=None, pktsize=8192, overlap=0, out_d
 
     with open(filename, 'wb') as fh:
         for iblock in range(nblocks):
-            header['PKTIDX'] = iblock*samples_per_block*data.nchan*2*2//pktsize
+            bytes_per_sample = data.nchan*2*2*nbytes
+            header['PKTIDX'] = iblock*samples_per_block*bytes_per_sample//pktsize
             start = iblock*samples_per_block
             end = (iblock + 1)*samples_per_block + overlap
             if end > nsamples:
                 end = nsamples
-                header['BLOCSIZE'] = (end - start)*data.nchan*2*2*nbytes
+                newsize = (end - start)*bytes_per_sample
+                oldsize = samples_per_block*bytes_per_sample
+                warnings.warn(f"Last block has size {newsize}, not {oldsize}, bytes")
+            header['BLOCSIZE'] = (end - start)*bytes_per_sample
             for card in header.cards_as_bytes():
                 fh.write(card)
             fh.write(b"END" + b" "*77)
