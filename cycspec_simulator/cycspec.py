@@ -48,7 +48,7 @@ class PeriodicSpectrum:
         arr = fft_roll(arr, shift*self.nbin)
         if sym_lim:
             vmin, vmax = symmetrize_limits(arr, vmin, vmax)
-        pc = ax.pcolormesh(self.phase, self.freq/1e6, arr, vmin=vmin, vmax=vmax, **kwargs)
+        pc = ax.pcolormesh(self.phase - shift, self.freq/1e6, arr, vmin=vmin, vmax=vmax, **kwargs)
         ax.set_xlabel('Phase (cycles)')
         ax.set_ylabel('Frequency (MHz)')
 

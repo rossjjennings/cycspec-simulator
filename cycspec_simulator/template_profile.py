@@ -148,7 +148,7 @@ class TemplateProfile:
         for name, arr in plot_arrays.items():
             phase = self.phase - shift
             arr_shifted = fft_roll(arr, shift*self.nbin)
-            lines = ax.plot(phase, arr_shifted, label=name,
+            lines = ax.plot(phase - shift, arr_shifted, label=name,
                             color=colors[name], **kwargs)
             artists.extend(lines)
 
