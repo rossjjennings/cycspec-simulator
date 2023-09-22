@@ -178,7 +178,7 @@ class ScintillationPattern:
         return BasebandData(
             A_new,
             B_new,
-            data.start_time,
+            data.t[self.impulse_response.shape[-1] - 1],
             data.feed_poln,
             data.chan_bw,
             data.obsfreq,
