@@ -159,13 +159,17 @@ class ScintillationPattern:
         ax.set_ylabel("Scattered intensity")
         return artists
 
-    def scatter(self, data):
+    def scatter(self, data, force=False):
         """
         Apply this scintillation pattern to baseband data.
         The returned BasebandData object will be shorter by a number of samples
         equal to one less than `self.n_samples`.
         """
-        new_shape = (data.A.shape[0], data.A.shape[1] - self.n_samples + 1)
+        if not force and (data.obsfreq != self.obsfreq or data.chan_bw != self.chan_bw):
+            raise ValueError(f"Data observing frequency ({data.obsfreq} Hz) "
+                             f"and channel bandwidth ({data.chan_bw} Hz) "
+                             "do not match this scintillation pattern")
+        new_shape = (data.A.shape[0], data.A.shape[1] - self.impulse_response.shape[-1] + 1)
         A_new = np.empty(new_shape, data.A.dtype)
         B_new = np.empty(new_shape, data.B.dtype)
         for ichan in range(data.nchan):
