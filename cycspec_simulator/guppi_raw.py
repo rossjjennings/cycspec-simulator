@@ -169,7 +169,7 @@ def write(filename, data, samples_per_block=None, pktsize=8192, overlap=0, out_d
         'STT_IMJD': data.t.mjd,
         'STT_SMJD': data.t.second + int(data.t[0].offset),
         'STT_OFFS': data.t[0].offset - int(data.t[0].offset),
-        'PKTIDX': 0,
+        'PKTIDX': 0, # to be filled in later
         'PKTSIZE': pktsize,
         'PKTFMT': '1SFA',
         'NRCVR': '2',
@@ -178,7 +178,7 @@ def write(filename, data, samples_per_block=None, pktsize=8192, overlap=0, out_d
         'FD_POLN': data.feed_poln,
         'NBITS': 8*nbytes,
         'OBSNCHAN': f'{data.nchan}',
-        'BLOCSIZE': blocsize,
+        'BLOCSIZE': 0, # to be filled in later
         'OVERLAP': overlap,
     })
 
@@ -196,7 +196,7 @@ def write(filename, data, samples_per_block=None, pktsize=8192, overlap=0, out_d
             if end > nsamples:
                 end = nsamples
                 newsize = (end - start)*bytes_per_sample
-                oldsize = samples_per_block*bytes_per_sample
+                oldsize = (samples_per_block + overlap)*bytes_per_sample
                 warnings.warn(f"Last block has size {newsize}, not {oldsize}, bytes")
             header['BLOCSIZE'] = (end - start)*bytes_per_sample
             for card in header.cards_as_bytes():
