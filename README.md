@@ -25,11 +25,20 @@ tempo -f B1937+21_pred.par -ZPSR=B1937+21 -ZOBS=GB -ZSTART=60000 -ZTOBS=1H -ZFRE
 
 An example command that uses `cycspec-make-raw` to create a raw data file is the following:
 ```bash
-cycspec-make-raw -t B1937+21.Rcvr1_2.GUPPI.15y.x.sum.sm -p polyco-B1937+21-60000.dat -o B1937+21-test.raw -n 4194304 -b 1.5625 -f 1500.78125 -s 4e-5
+cycspec-make-raw -t B1937+21.Rcvr1_2.GUPPI.15y.x.sum.sm -p polyco-B1937+21-60000.dat -o B1937+21-test.raw -n 4194304 -c 2 -b 1.5625 -f 1500 -s 4e-5
 ```
-The above command uses the included example template and polyco files to create 2^22 = 4 194 304 samples, at a bandwidth of 1.5625 MHz (corresponding to a total integration time of approximately 2.68 s) and a nominal center frequency of 1500.78125 MHz, including scattering with a scattering time of 40 μs (i.e., 4 × 10^-5 seconds).
+The above command uses the included example template and polyco files to create 2^22 = 4 194 304 samples in each of two channels, with a channel bandwidth of 1.5625 MHz (corresponding to a total integration time of approximately 2.68 s) and a center frequency of 1500 MHz, including scattering with a scattering time of 40 μs (i.e., 4 × 10^-5 seconds).
 
 To get the full list of command-line arguments, run `cycspec-make-raw -h`.
+
+The simulated data can be processed to produce a periodic spectrum using [DSPSR](https://dspsr.sourceforge.net/) as follows:
+```bash
+dspsr -cyclic 128 -b 256 -P polyco-B1937+21-60000.dat -U 20 -D 0.0 -a PSRFITS -O simulated-data -e fits simulated-data.raw
+```
+The output can be viewed using `pav`, a tool that is part of [PSRCHIVE](https://psrchive.sourceforge.net/):
+```bash
+pav -GTpd simulated-data.raw
+```
 
 ## Using from Python
 For more control over the simulation, you can write your own Python code using the provided classes, either in a script or in a notebook. For this purpose, the most important class is `BasebandModel`. Once you have constructed a `BasebandModel` instance, you can use its `sample()` method to create simulated data.
