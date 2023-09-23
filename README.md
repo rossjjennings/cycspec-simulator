@@ -79,7 +79,7 @@ plt.colorbar(pc)
 plt.show()
 ```
 
-A somewhat more realistic simulation based on a real pulse profile and polyco file. which writes the resulting data to a GUPPI raw file, is not much more complicated:
+A somewhat more realistic simulation based on a real pulse profile and polyco file, which writes the resulting data to a GUPPI raw file, is not much more complicated:
 ```python
 import numpy as np
 from cycspec_simulator import (
