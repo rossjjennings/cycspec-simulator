@@ -37,7 +37,7 @@ dspsr -cyclic 128 -b 256 -P polyco-B1937+21-60000.dat -U 20 -D 0.0 -a PSRFITS -O
 ```
 The output can be viewed using `pav`, a tool that is part of [PSRCHIVE](https://psrchive.sourceforge.net/):
 ```bash
-pav -GTpd simulated-data.raw
+pav -GTpd simulated-data.fits
 ```
 
 ## Using from Python
