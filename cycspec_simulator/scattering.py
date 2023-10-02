@@ -37,7 +37,7 @@ class ExponentialScatteringModel:
         n_samples = self.nchan*np.int64(self.cutoff*self.scattering_time*self.chan_bw)
         time = np.linspace(0, n_samples*dt, n_samples, endpoint=False)
         envelope = np.exp(-time/self.scattering_time)*dt/self.scattering_time
-        noise = (self.rng.normal(n_samples) + 1j*self.rng.normal(n_samples))/2
+        noise = (self.rng.normal(size=n_samples) + 1j*self.rng.normal(size=n_samples))/2
         impulse_response = np.sqrt(envelope)*noise
 
         # split into channels
