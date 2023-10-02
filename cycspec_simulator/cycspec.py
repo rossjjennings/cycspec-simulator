@@ -8,7 +8,7 @@ from .plot_helpers import symmetrize_limits
 from .time import Time
 
 class PeriodicSpectrum:
-    def __init__(self, freq, I, Q=None, U=None, V=None):
+    def __init__(self, freq, feed_poln, start_time, I, Q=None, U=None, V=None):
         """
         Create a new peiodic spectrum from frequency, I, Q, U, and V arrays.
         If one of Q, U, or V is present, all must be present with the same shape.
@@ -118,5 +118,5 @@ def pspec_numba(data, ncyc, nbin, phase_predictor, use_midpt=True, round_to_near
         pspec_CI,
         data.feed_poln,
     )
-    pspec = PeriodicSpectrum(freq, I, Q, U, V)
+    pspec = PeriodicSpectrum(freq, data.feed_poln, data.start_time, I, Q, U, V)
     return pspec
