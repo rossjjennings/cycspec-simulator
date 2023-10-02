@@ -8,6 +8,8 @@ import numbers
 import warnings
 
 from .metadata import ObservingMetadata
+from .baseband import BasebandData
+from .time import Time
 
 class GuppiRawHeader:
     def __init__(self, cards):
@@ -89,7 +91,7 @@ def read_headers(filename):
             yield header
             fh.seek(header['BLOCSIZE'], os.SEEK_CUR)
 
-def read(filename, use_dask=True):
+def read_raw(filename, use_dask=True):
     headers = []
     chunks = []
     which_chunk = 0
@@ -130,6 +132,17 @@ def read(filename, use_dask=True):
     else:
         data = np.concatenate(chunks, axis=1)
     return headers, data
+
+def read(filename, use_dask=True):
+    headers, data = read_raw(filename, use_dask=use_dask)
+    complex_data = data[..., 0] + 1j*data[..., 1]
+    A = complex_data[..., 0]
+    B = complex_data[..., 0]
+    start_time = Time(headers[0]['STT_IMJD'], headers[0]['STT_SMJD'], headers[0]['STT_OFFS'])
+    feed_poln = headers[0]['FD_POLN']
+    chan_bw = float(headers[0]['OBSBW'])/int(headers[0]['OBSNCHAN'])*1e6
+    obsfreq = float(headers[0]['OBSFREQ'])*1e6
+    return BasebandData(A, B, start_time, feed_poln, chan_bw, obsfreq)
 
 def quantize(data, out_dtype=np.int8, autoscale=True):
     stacked = np.stack([data.A, data.B], axis=-1)
