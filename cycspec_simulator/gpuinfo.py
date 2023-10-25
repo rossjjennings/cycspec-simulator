@@ -13,9 +13,9 @@ class CudaError(Exception):
     def __init__(self, err):
         super().__init__(err.name.removeprefix('CUDA_ERROR_'))
 
-def get_cuda_attribute(attr_name):
+def get_cuda_attribute(attr_name, device_id):
     attr_id = getattr(CUdevice_attribute, f'CU_DEVICE_ATTRIBUTE_{attr_name}')
-    err, attr = cuDeviceGetAttribute(attr_id, 0)
+    err, attr = cuDeviceGetAttribute(attr_id, device_id)
     if err:
         raise CudaError(err)
     else:
