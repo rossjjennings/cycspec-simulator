@@ -55,7 +55,7 @@ class PeriodicSpectrum:
         return pc
 
 @nb.njit
-def cycfold_numba(phi, A, B, nchan, nbin, use_midpt=True, round_to_nearest=True):
+def _cycfold_cpu(phi, A, B, nchan, nbin, use_midpt=True, round_to_nearest=True):
     nlag = nchan//2 + 1
     ncorr = A.size - nlag + 1
     corr_AA = np.zeros((nlag, nbin), dtype=np.complex128)
@@ -84,7 +84,7 @@ def cycfold_numba(phi, A, B, nchan, nbin, use_midpt=True, round_to_nearest=True)
     corr_BB /= samples
     return corr_AA, corr_AB, corr_BA, corr_BB
 
-def pspec_numba(data, ncyc, nbin, phase_predictor, use_midpt=True, round_to_nearest=True):
+def cycfold_cpu(data, ncyc, nbin, phase_predictor, use_midpt=True, round_to_nearest=True):
     offset = np.empty(2*data.t.offset.size - 1)
     offset[::2] = data.t.offset
     offset[1::2] = (data.t.offset[1:] + data.t.offset[:-1])/2

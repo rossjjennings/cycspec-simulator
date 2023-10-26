@@ -3,7 +3,8 @@ from .baseband import BasebandModel, BasebandData
 from .phase_predictor import FreqOnlyPredictor, PolynomialPredictor
 from .scattering import ExponentialScatteringModel
 from .interpolation import fft_roll, fft_interp, lerp
-from .cycspec import pspec_numba
+from .cycspec import cycfold_cpu
+from .cycspec_gpu import cycfold_gpu
 from .folding import fold
 from .time import Time
 from .metadata import ObservingMetadata
