@@ -97,7 +97,7 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, use_midpt=True, round_to_near
     pspec_CI = np.empty(pspec_shape, dtype=np.float64)
     freq = np.empty(data.nchan*ncyc, dtype=np.float64)
     for ichan in range(data.nchan):
-        corr_AA, corr_AB, corr_BA, corr_BB = cycfold_numba(
+        corr_AA, corr_AB, corr_BA, corr_BB = _cycfold_cpu(
             phi, data.A[ichan], data.B[ichan], ncyc, nbin, use_midpt, round_to_nearest
         )
         corr_CR = (corr_AB + corr_BA)/2
