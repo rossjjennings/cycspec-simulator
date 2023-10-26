@@ -45,7 +45,7 @@ For more control over the simulation, you can write your own Python code using t
 
 Creating a `BasebandModel` requires a template profile (class `TemplateProfile`), and a phase predictor (such as a `PolynomialPredictor` or `FreqOnlyPredictor`) with a `phase()` method that can be used to compute the pulse phase at any particular time. A `TemplateProfile` can be constructed either directly from Numpy arrays giving the Stokes parameters I, Q, U, and V (or total intensity, I, only) as a function of phase, or from a template file. Similarly, a phase predictor can be a `PolynomialPredictor` derived from a polyco file, or a `FreqOnlyPredictor` depending only on the pulse frequency and phase zero point.
 
-Once the data is generated, scattering can be applied using the `scatter()` method of a `ScintillationPattern` instance, and the data can be folded to form a periodic spectrum using the `cycspec.pspec_numba()` function, or written to disk using the `guppi_raw.write()` function. Putting it all together, a script to create simulated data based on a simple Gaussian pulse, and fold it to produce a periodic spectrum estimate, might look like the following:
+Once the data is generated, scattering can be applied using the `scatter()` method of a `ScintillationPattern` instance, and the data can be folded to form a periodic spectrum using the `cycspec.cycfold_cpu()` function, or written to disk using the `guppi_raw.write()` function. Putting it all together, a script to create simulated data based on a simple Gaussian pulse, and fold it to produce a periodic spectrum estimate, might look like the following:
 ```python
 import numpy as np
 import matplotlib.pyplot as plt
@@ -55,7 +55,7 @@ from cycspec_simulator import (
 	FreqOnlyPredictor,
 	ExponentialScatteringModel,
 	Time,
-	pspec_numba,
+	cycfold_cpu,
 )
 
 phase = np.linspace(0, 1, 2048, endpoint=False)
@@ -81,7 +81,7 @@ data = pattern.scatter(data)
 
 nchan = 512
 nbin = 1024
-pspec = pspec_numba(data, nchan, nbin, predictor)
+pspec = cycfold_cpu(data, nchan, nbin, predictor)
 
 pc = pspec.plot(shift=0.5, cmap='RdBu_r', sym_lim=True)
 plt.colorbar(pc)

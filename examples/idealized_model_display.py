@@ -6,7 +6,7 @@ from cycspec_simulator import (
 	FreqOnlyPredictor,
 	ExponentialScatteringModel,
 	Time,
-	pspec_numba,
+	cycfold_cpu,
 )
 
 phase = np.linspace(0, 1, 2048, endpoint=False)
@@ -32,7 +32,7 @@ data = pattern.scatter(data)
 
 nchan = 512
 nbin = 1024
-pspec = pspec_numba(data, nchan, nbin, predictor)
+pspec = cycfold_cpu(data, nchan, nbin, predictor)
 
 pc = pspec.plot(shift=0.5, cmap='RdBu_r', sym_lim=True)
 plt.colorbar(pc)
