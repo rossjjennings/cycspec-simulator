@@ -8,8 +8,8 @@ from .time import Time
 from .metadata import ObservingMetadata
 from .guppi_raw import write
 
-def make_raw(template_file, polyco_file, out_file, n_samples, chan_bw,
-             nchan, obsfreq, scattering_time, start_mjd, start_second):
+def make_raw(template_file, polyco_file, out_file, samples_per_block, blocks, overlap,
+             chan_bw, nchan, obsfreq, scattering_time, start_mjd, start_second):
     """
     Create a file with simulated data in GUPPI Raw format.
 
@@ -51,6 +51,7 @@ def make_raw(template_file, polyco_file, out_file, n_samples, chan_bw,
     if start_second is None:
         start_second = predictor.epoch.second
         start_second += int(np.round(predictor.epoch.offset))
+    n_samples = samples_per_block*blocks + overlap
     n_extra_samples = pattern.impulse_response.shape[-1] - 1
     t_start = Time(start_mjd, start_second, -n_extra_samples/chan_bw)
     data = model.sample(n_samples + n_extra_samples, t_start=t_start)
@@ -58,7 +59,7 @@ def make_raw(template_file, polyco_file, out_file, n_samples, chan_bw,
 
     metadata = ObservingMetadata.from_file(template_file)
     metadata.observer = "cycspec-simulator"
-    write(out_file, data, metadata=metadata)
+    write(out_file, data, samples_per_block, overlap=overlap, metadata=metadata)
 
 def main():
     import argparse
@@ -67,7 +68,9 @@ def main():
     parser.add_argument('-t', '--template-file', type=str, help="Template file (PSRFITS format)")
     parser.add_argument('-p', '--polyco-file', type=str, help="TEMPO Polyco file")
     parser.add_argument('-o', '--out-file', type=str, help="Output file name")
-    parser.add_argument('-n', '--n-samples', type=int, help="Number of samples to simulate")
+    parser.add_argument('-n', '--samples-per-block', type=int, help="Number of samples per block")
+    parser.add_argument('-B', '--blocks', type=int, help="Number of blocks")
+    parser.add_argument('-O', '--overlap', type=int, default=0, help="Number of overlap samples per block")
     parser.add_argument('-c', '--nchan', type=int, default=1, help="Number of channels to simulate")
     parser.add_argument('-b', '--bandwidth', type=float, help="Channel bandwidth (MHz)")
     parser.add_argument('-f', '--obsfreq', type=float, help="Observing frequency (MHz)")
@@ -80,7 +83,9 @@ def main():
         args.template_file,
         args.polyco_file,
         args.out_file,
-        args.n_samples,
+        args.samples_per_block,
+        args.blocks,
+        args.overlap,
         args.bandwidth*1e6,
         args.nchan,
         args.obsfreq*1e6,
