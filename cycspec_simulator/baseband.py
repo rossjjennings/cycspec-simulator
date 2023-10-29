@@ -5,6 +5,11 @@ import dask.array as da
 from .interpolation import fft_interp, lerp
 from .time import Time
 
+def complex_white_noise(shape, rng, dtype):
+    real = rng.standard_normal(size=shape, dtype=dtype)
+    imag = rng.standard_normal(size=shape, dtype=dtype)
+    return (real + 1j*imag)/np.sqrt(2)
+
 class BasebandModel:
     def __init__(self, template, predictor, chan_bw, nchan=1, obsfreq=0,
                  noise_level=0, feed_poln='LIN', rng=None):
@@ -37,7 +42,7 @@ class BasebandModel:
         else:
             self.rng = rng
 
-    def sample(self, n_samples, t_start=None, interp=lerp):
+    def sample(self, n_samples, t_start=None, interp=lerp, dtype=np.float32):
         """
         Simulate a given number of samples from the modeled baseband time series.
 
@@ -53,25 +58,17 @@ class BasebandModel:
         """
         if t_start is None:
             t_start = self.predictor.epoch
+        dtype = np.dtype(dtype)
 
         delayed = isinstance(self.rng, da.random.Generator)
         t = get_time_axis(t_start, n_samples, self.chan_bw, delayed=delayed)
-        phase = self.predictor.phase(t)
-        binno = phase*self.template.nbin
+        phase = self.predictor.phase(t) - int(self.predictor.phase(t_start))
+        binno = (phase*self.template.nbin).astype(dtype)
         I = interp(self.template.I, binno)
         shape = (self.nchan, n_samples)
-        noise1 = (
-            (self.rng.normal(size=shape) + 1j*self.rng.normal(size=shape))
-            /np.sqrt(2)
-        )
-        noise2 = (
-            (self.rng.normal(size=shape) + 1j*self.rng.normal(size=shape))
-            /np.sqrt(2)
-        )
-        noise3 = (
-            (self.rng.normal(size=shape) + 1j*self.rng.normal(size=shape))
-            /np.sqrt(2)
-        )
+        noise1 = complex_white_noise(shape, self.rng, dtype)
+        noise2 = complex_white_noise(shape, self.rng, dtype)
+        noise3 = complex_white_noise(shape, self.rng, dtype)
         if self.template.full_stokes:
             Q = interp(self.template.Q, binno)
             U = interp(self.template.U, binno)
