@@ -4,7 +4,7 @@ from .phase_predictor import FreqOnlyPredictor, PolynomialPredictor
 from .scattering import ExponentialScatteringModel
 from .interpolation import fft_roll, fft_interp, lerp
 from .cycspec import cycfold_cpu
-from .cycspec_gpu import cycfold_gpu
+from .cycspec_gpu import cycfold_gpu, cycfold_gpu_sharedmem
 from .folding import fold
 from .time import Time
 from .metadata import ObservingMetadata
