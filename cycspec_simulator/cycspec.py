@@ -1,6 +1,7 @@
 import numpy as np
 import numba as nb
 import matplotlib.pyplot as plt
+import time
 
 from .interpolation import fft_roll
 from .polarization import validate_stokes, coherence_to_stokes
@@ -86,7 +87,6 @@ class NumbaThreads:
 @nb.njit(parallel=True)
 def _cycfold_cpu(A, B, nlag, nbin, binplan):
     nchan = A.shape[0]
-    ncorr = A.shape[1] - nlag + 1
     corr_AA = np.zeros((nchan, nlag, nbin), dtype=A.dtype)
     corr_AB = np.zeros((nchan, nlag, nbin), dtype=A.dtype)
     corr_BA = np.zeros((nchan, nlag, nbin), dtype=A.dtype)
@@ -94,6 +94,7 @@ def _cycfold_cpu(A, B, nlag, nbin, binplan):
     samples = np.zeros((nchan, nlag, nbin), dtype=np.int64)
     for ichan in range(nchan):
         for ilag in nb.prange(nlag):
+            ncorr = A.shape[1] - ilag
             for icorr in range(ncorr):
                 phase_bin = binplan[2*icorr + ilag]
                 samples[ichan, ilag, phase_bin] += 1
@@ -123,10 +124,15 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, n_threads=nb.config.NUMBA_NUM
     t = Time(data.t.mjd, data.t.second, offset)
     phase = phase_predictor.phase(t)
     binplan = np.int64(np.round((phase % 1)*nbin)) % nbin
-    with NumbaThreads(n_threads):
+    timer = CPUTimer()
+    with timer, NumbaThreads(n_threads):
         corr_AA, corr_AB, corr_BA, corr_BB, samples = _cycfold_cpu(
             data.A, data.B, nlag, nbin, binplan
         )
+    print(f"Elapsed time: {timer.elapsed:g} ms")
+    print(f"Total products accumulated: {4*np.sum(samples)}")
+    throughput = 4*np.sum(samples)/(timer.elapsed/1000)
+    print(f"Throughput: {throughput:g} products/sec.")
     corr_CR = (corr_AB + corr_BA)/2
     corr_CI = (corr_AB - corr_BA)/2j
     pspec_AA = np.fft.fftshift(np.fft.hfft(corr_AA, axis=1), axes=1)

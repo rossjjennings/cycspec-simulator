@@ -7,6 +7,28 @@ from .polarization import coherence_to_stokes
 from .time import Time
 from .cycspec import PeriodicSpectrum
 
+class CUDATimer:
+    """
+    A context manager for timing CUDA code using Events.
+    Borrowed from Carlos Costa, "CUDA by Numba Examples",
+    https://towardsdatascience.com/cuda-by-numba-examples-7652412af1ee
+    """
+    def __init__(self, stream):
+        self.stream = stream
+        self.elapsed = None # elapsed time in ms
+
+    def __enter__(self):
+        self.event_begin = cuda.event()
+        self.event_end = cuda.event()
+        self.event_begin.record(stream=self.stream)
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.event_end.record(stream=self.stream)
+        self.event_end.wait(stream=self.stream)
+        self.event_end.synchronize()
+        self.elapsed = self.event_begin.elapsed_time(self.event_end)
+
 @cuda.jit
 def _cycfold_gpu(A, B, nbin, binplan, n_samples,
                  AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag):
@@ -20,16 +42,16 @@ def _cycfold_gpu(A, B, nbin, binplan, n_samples,
         ibin = binplan[2*icorr + ilag]
         ibuf = ichan*nlag*nbin + ilag*nbin + ibin
         cuda.atomic.add(n_samples, ibuf, 1)
-        product_AA = (A[ichan, icorr] * A[ichan, icorr + ilag].conjugate())
+        product_AA = (A[ichan, icorr + ilag] * A[ichan, icorr].conjugate())
         cuda.atomic.add(AA_real, ibuf, product_AA.real)
         cuda.atomic.add(AA_imag, ibuf, product_AA.imag)
-        product_AB = (A[ichan, icorr] * B[ichan, icorr + ilag].conjugate())
+        product_AB = (A[ichan, icorr + ilag] * B[ichan, icorr].conjugate())
         cuda.atomic.add(AB_real, ibuf, product_AB.real)
         cuda.atomic.add(AB_imag, ibuf, product_AB.imag)
-        product_BA = (B[ichan, icorr] * A[ichan, icorr + ilag].conjugate())
+        product_BA = (B[ichan, icorr + ilag] * A[ichan, icorr].conjugate())
         cuda.atomic.add(BA_real, ibuf, product_BA.real)
         cuda.atomic.add(BA_imag, ibuf, product_BA.imag)
-        product_BB = (B[ichan, icorr] * B[ichan, icorr + ilag].conjugate())
+        product_BB = (B[ichan, icorr + ilag] * B[ichan, icorr].conjugate())
         cuda.atomic.add(BB_real, ibuf, product_BB.real)
         cuda.atomic.add(BB_imag, ibuf, product_BB.imag)
 
@@ -56,13 +78,18 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor):
     BA_imag = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
     BB_real = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
     BB_imag = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    cuda.profile_start()
-    _cycfold_gpu[(nlag, data.nchan), 512](
-        A_gpu, B_gpu, nbin, binplan, n_samples,
-        AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag
-    )
-    cuda.profile_stop()
+    stream = cuda.stream()
+    with CUDATimer(stream) as cudatimer:
+        cuda.profile_start()
+        _cycfold_gpu[(nlag, data.nchan), 512, stream](
+            A_gpu, B_gpu, nbin, binplan, n_samples,
+            AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag
+        )
+        cuda.profile_stop()
+    print(f"Elapsed time: {cudatimer.elapsed:g} ms")
     print(f"Total products accumulated: {4*np.sum(n_samples)}")
+    throughput = 4*np.sum(n_samples)/(cudatimer.elapsed/1000)
+    print(f"Throughput: {throughput:g} products/sec.")
 
     AA = (AA_real + 1j*AA_imag)/n_samples
     AA = AA.reshape(data.nchan, nlag, nbin)
@@ -72,10 +99,14 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor):
     CR = CR.reshape(data.nchan, nlag, nbin)
     CI = (AB_real - BA_real + 1j*(AB_imag - BA_imag))/(2j*n_samples)
     CI = CI.reshape(data.nchan, nlag, nbin)
-    pspec_AA = np.fft.hfft(AA.get(), axis=1).reshape(data.nchan*ncyc, nbin)
-    pspec_BB = np.fft.hfft(BB.get(), axis=1).reshape(data.nchan*ncyc, nbin)
-    pspec_CR = np.fft.hfft(CR.get(), axis=1).reshape(data.nchan*ncyc, nbin)
-    pspec_CI = np.fft.hfft(CI.get(), axis=1).reshape(data.nchan*ncyc, nbin)
+    pspec_AA = np.fft.fftshift(np.fft.hfft(AA.get(), axis=1), axes=1)
+    pspec_AA = pspec_AA.reshape(data.nchan*ncyc, nbin)
+    pspec_BB = np.fft.fftshift(np.fft.hfft(BB.get(), axis=1), axes=1)
+    pspec_BB = pspec_BB.reshape(data.nchan*ncyc, nbin)
+    pspec_CR = np.fft.fftshift(np.fft.hfft(CR.get(), axis=1), axes=1)
+    pspec_CR = pspec_CR.reshape(data.nchan*ncyc, nbin)
+    pspec_CI = np.fft.fftshift(np.fft.hfft(CI.get(), axis=1), axes=1)
+    pspec_CI = pspec_CI.reshape(data.nchan*ncyc, nbin)
     bandwidth = data.nchan*data.chan_bw
     nfreq = data.nchan*ncyc
     freq = data.obsfreq + np.linspace(-bandwidth/2, bandwidth/2, nfreq, endpoint=False)
@@ -126,16 +157,16 @@ def cycfold_gpu_sharedmem(data, ncyc, nbin, phase_predictor):
             ibuf = ichan*nlag*nbin + ilag*nbin + ibin
             if igrid + ilag < A.shape[1]:
                 cuda.atomic.add(n_samples, ibuf, 1)
-                product_AA = (A_shared[ithread] * A_shared[ithread + ilag].conjugate())
+                product_AA = (A_shared[ithread + ilag] * A_shared[ithread].conjugate())
                 cuda.atomic.add(AA_real, ibuf, product_AA.real)
                 cuda.atomic.add(AA_imag, ibuf, product_AA.imag)
-                product_AB = (A_shared[ithread] * B_shared[ithread + ilag].conjugate())
+                product_AB = (A_shared[ithread + ilag] * B_shared[ithread].conjugate())
                 cuda.atomic.add(AB_real, ibuf, product_AB.real)
                 cuda.atomic.add(AB_imag, ibuf, product_AB.imag)
-                product_BA = (B_shared[ithread] * A_shared[ithread + ilag].conjugate())
+                product_BA = (B_shared[ithread + ilag] * A_shared[ithread].conjugate())
                 cuda.atomic.add(BA_real, ibuf, product_BA.real)
                 cuda.atomic.add(BA_imag, ibuf, product_BA.imag)
-                product_BB = (B_shared[ithread] * B_shared[ithread + ilag].conjugate())
+                product_BB = (B_shared[ithread + ilag] * B_shared[ithread].conjugate())
                 cuda.atomic.add(BB_real, ibuf, product_BB.real)
                 cuda.atomic.add(BB_imag, ibuf, product_BB.imag)
 
@@ -161,14 +192,18 @@ def cycfold_gpu_sharedmem(data, ncyc, nbin, phase_predictor):
     BA_imag = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
     BB_real = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
     BB_imag = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    cuda.profile_start()
-    print(nblocks)
-    _cycfold_gpu_sharedmem[(nblocks, data.nchan), threads_per_block](
-        A_gpu, B_gpu, nbin, binplan, n_samples,
-        AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag
-    )
-    cuda.profile_stop()
+    stream = cuda.stream()
+    with CUDATimer(stream) as cudatimer:
+        cuda.profile_start()
+        _cycfold_gpu_sharedmem[(nblocks, data.nchan), threads_per_block, stream](
+            A_gpu, B_gpu, nbin, binplan, n_samples,
+            AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag
+        )
+        cuda.profile_stop()
+    print(f"Elapsed time: {cudatimer.elapsed:g} ms")
     print(f"Total products accumulated: {4*np.sum(n_samples)}")
+    throughput = 4*np.sum(n_samples)/(cudatimer.elapsed/1000)
+    print(f"Throughput: {throughput:g} products/sec.")
 
     AA = (AA_real + 1j*AA_imag)/n_samples
     AA = AA.reshape(data.nchan, nlag, nbin)
@@ -178,10 +213,14 @@ def cycfold_gpu_sharedmem(data, ncyc, nbin, phase_predictor):
     CR = CR.reshape(data.nchan, nlag, nbin)
     CI = (AB_real - BA_real + 1j*(AB_imag - BA_imag))/(2j*n_samples)
     CI = CI.reshape(data.nchan, nlag, nbin)
-    pspec_AA = np.fft.hfft(AA.get(), axis=1).reshape(data.nchan*ncyc, nbin)
-    pspec_BB = np.fft.hfft(BB.get(), axis=1).reshape(data.nchan*ncyc, nbin)
-    pspec_CR = np.fft.hfft(CR.get(), axis=1).reshape(data.nchan*ncyc, nbin)
-    pspec_CI = np.fft.hfft(CI.get(), axis=1).reshape(data.nchan*ncyc, nbin)
+    pspec_AA = np.fft.fftshift(np.fft.hfft(AA.get(), axis=1), axes=1)
+    pspec_AA = pspec_AA.reshape(data.nchan*ncyc, nbin)
+    pspec_BB = np.fft.fftshift(np.fft.hfft(BB.get(), axis=1), axes=1)
+    pspec_BB = pspec_BB.reshape(data.nchan*ncyc, nbin)
+    pspec_CR = np.fft.fftshift(np.fft.hfft(CR.get(), axis=1), axes=1)
+    pspec_CR = pspec_CR.reshape(data.nchan*ncyc, nbin)
+    pspec_CI = np.fft.fftshift(np.fft.hfft(CI.get(), axis=1), axes=1)
+    pspec_CI = pspec_CI.reshape(data.nchan*ncyc, nbin)
     bandwidth = data.nchan*data.chan_bw
     nfreq = data.nchan*ncyc
     freq = data.obsfreq + np.linspace(-bandwidth/2, bandwidth/2, nfreq, endpoint=False)
