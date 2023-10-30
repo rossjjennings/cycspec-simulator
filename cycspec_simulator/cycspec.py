@@ -54,25 +54,47 @@ class PeriodicSpectrum:
 
         return pc
 
+class CPUTimer:
+    """
+    Context manager for timing CPU code.
+    """
+    def __init__(self):
+        self.elapsed = None # elapsed time in ms
+
+    def __enter__(self):
+        self.start_time_ns = time.perf_counter_ns()
+
+    def __exit__(self, type, value, traceback):
+        self.end_time_ns = time.perf_counter_ns()
+        self.elapsed = (self.end_time_ns - self.start_time_ns)/1e6
+
+class NumbaThreads:
+    """
+    Context manager for setting and restoring the number of
+    threads launched by Numba for parallel functions.
+    """
+    def __init__(self, n_threads):
+        self.n_threads = n_threads
+
+    def __enter__(self):
+        self.n_threads_old = nb.get_num_threads()
+        nb.set_num_threads(self.n_threads)
+
+    def __exit__(self, type, value, traceback):
+        nb.set_num_threads(self.n_threads_old)
+
 @nb.njit(parallel=True)
-def _cycfold_cpu(phi, A, B, nchan, nbin, use_midpt=True, round_to_nearest=True):
+def _cycfold_cpu(A, B, nchan, nbin, binplan):
     nlag = nchan//2 + 1
     ncorr = A.size - nlag + 1
-    corr_AA = np.zeros((nlag, nbin), dtype=np.complex128)
-    corr_AB = np.zeros((nlag, nbin), dtype=np.complex128)
-    corr_BA = np.zeros((nlag, nbin), dtype=np.complex128)
-    corr_BB = np.zeros((nlag, nbin), dtype=np.complex128)
+    corr_AA = np.zeros((nlag, nbin), dtype=A.dtype)
+    corr_AB = np.zeros((nlag, nbin), dtype=A.dtype)
+    corr_BA = np.zeros((nlag, nbin), dtype=A.dtype)
+    corr_BB = np.zeros((nlag, nbin), dtype=A.dtype)
     samples = np.zeros((nlag, nbin), dtype=np.int64)
     for ilag in nb.prange(nlag):
         for icorr in range(ncorr):
-            if use_midpt:
-                phase = phi[2*icorr + ilag] % 1
-            else:
-                phase = phi[2*icorr] % 1
-            if round_to_nearest:
-                phase_bin = np.int64(np.round(phase*nbin)) % nbin
-            else:
-                phase_bin = np.int64(phase*nbin)
+            phase_bin = binplan[2*icorr + ilag]
             samples[ilag, phase_bin] += 1
             corr_AA[ilag, phase_bin] += A[icorr + ilag] * A[icorr].conjugate()
             corr_AB[ilag, phase_bin] += A[icorr + ilag] * B[icorr].conjugate()
@@ -84,22 +106,24 @@ def _cycfold_cpu(phi, A, B, nchan, nbin, use_midpt=True, round_to_nearest=True):
     corr_BB /= samples
     return corr_AA, corr_AB, corr_BA, corr_BB
 
-def cycfold_cpu(data, ncyc, nbin, phase_predictor, use_midpt=True, round_to_nearest=True):
+def cycfold_cpu(data, ncyc, nbin, phase_predictor, use_midpt=True, round_to_nearest=True, n_threads=nb.config.NUMBA_NUM_THREADS):
     offset = np.empty(2*data.t.offset.size - 1)
     offset[::2] = data.t.offset
     offset[1::2] = (data.t.offset[1:] + data.t.offset[:-1])/2
     t = Time(data.t.mjd, data.t.second, offset)
-    phi = phase_predictor.phase(t)
+    phase = phase_predictor.phase(t)
+    binplan = np.int64(np.round((phase % 1)*nbin)) % nbin
     pspec_shape = (data.nchan*ncyc, nbin)
-    pspec_AA = np.empty(pspec_shape, dtype=np.float64)
-    pspec_BB = np.empty(pspec_shape, dtype=np.float64)
-    pspec_CR = np.empty(pspec_shape, dtype=np.float64)
-    pspec_CI = np.empty(pspec_shape, dtype=np.float64)
-    freq = np.empty(data.nchan*ncyc, dtype=np.float64)
+    pspec_AA = np.empty(pspec_shape, dtype=data.A.real.dtype)
+    pspec_BB = np.empty(pspec_shape, dtype=data.A.real.dtype)
+    pspec_CR = np.empty(pspec_shape, dtype=data.A.real.dtype)
+    pspec_CI = np.empty(pspec_shape, dtype=data.A.real.dtype)
+    freq = np.empty(data.nchan*ncyc, dtype=data.A.real.dtype)
     for ichan in range(data.nchan):
-        corr_AA, corr_AB, corr_BA, corr_BB = _cycfold_cpu(
-            phi, data.A[ichan], data.B[ichan], ncyc, nbin, use_midpt, round_to_nearest
-        )
+        with NumbaThreads(n_threads):
+            corr_AA, corr_AB, corr_BA, corr_BB = _cycfold_cpu(
+                data.A[ichan], data.B[ichan], ncyc, nbin, binplan
+            )
         corr_CR = (corr_AB + corr_BA)/2
         corr_CI = (corr_AB - corr_BA)/2j
         pspec_AA[ichan*ncyc:(ichan+1)*ncyc] = np.fft.fftshift(np.fft.hfft(corr_AA, axis=0), axes=0)
