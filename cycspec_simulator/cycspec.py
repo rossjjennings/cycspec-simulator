@@ -54,7 +54,7 @@ class PeriodicSpectrum:
 
         return pc
 
-@nb.njit
+@nb.njit(parallel=True)
 def _cycfold_cpu(phi, A, B, nchan, nbin, use_midpt=True, round_to_nearest=True):
     nlag = nchan//2 + 1
     ncorr = A.size - nlag + 1
@@ -63,8 +63,8 @@ def _cycfold_cpu(phi, A, B, nchan, nbin, use_midpt=True, round_to_nearest=True):
     corr_BA = np.zeros((nlag, nbin), dtype=np.complex128)
     corr_BB = np.zeros((nlag, nbin), dtype=np.complex128)
     samples = np.zeros((nlag, nbin), dtype=np.int64)
-    for icorr in range(ncorr):
-        for ilag in range(nlag):
+    for ilag in nb.prange(nlag):
+        for icorr in range(ncorr):
             if use_midpt:
                 phase = phi[2*icorr + ilag] % 1
             else:
