@@ -129,7 +129,9 @@ def cycfold_gpu_sharedmem(data, ncyc, nbin, phase_predictor):
     shared_binplan_size = 2*threads_per_block + nlag - 2
     shared_samples_size = threads_per_block + nlag - 1
 
-    @cuda.jit
+    @cuda.jit((nb.complex64[:,:], nb.complex64[:,:], nb.int64, nb.int64[:], nb.int32[:],
+               nb.float32[:], nb.float32[:], nb.float32[:], nb.float32[:],
+               nb.float32[:], nb.float32[:], nb.float32[:], nb.float32[:]))
     def _cycfold_gpu_sharedmem(A, B, nbin, binplan, n_samples,
                                AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag):
         iblock = cuda.blockIdx.x
