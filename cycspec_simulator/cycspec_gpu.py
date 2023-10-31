@@ -29,7 +29,9 @@ class CUDATimer:
         self.event_end.synchronize()
         self.elapsed = self.event_begin.elapsed_time(self.event_end)
 
-@cuda.jit
+@cuda.jit((nb.complex64[:,:], nb.complex64[:,:], nb.int64, nb.int64[:], nb.int32[:],
+           nb.float32[:], nb.float32[:], nb.float32[:], nb.float32[:],
+           nb.float32[:], nb.float32[:], nb.float32[:], nb.float32[:]))
 def _cycfold_gpu(A, B, nbin, binplan, n_samples,
                  AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag):
     ilag = cuda.blockIdx.x
