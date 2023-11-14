@@ -8,17 +8,17 @@ dynamic = ["version"]
 authors = [
     {name = "Ross Jennings", email = "ross.jennings@nanograv.org"},
 ]
-requires-python = ">=3.9" # required by numba 0.57
+requires-python = ">=3.7" # for time.perf_counter_ns()
 dependencies = [
-    "numpy>=1.21.6", # required by numba 0.57
-    "scipy>=1.5.3", # any python 3.9 compatibile version
-    "matplotlib>=3.3.3", # any python 3.9 compatibile version
-    "astropy>=4.0.4", # any python 3.9 compatibile version
-    "numba>=0.57.0", # nopython mode features needed for fold_numba()
-    "dask>=2023.2.1", # dask.array.random.default_rng()
+    "numpy>=1.15.0",
+    "scipy>=1.2.1",
+    "matplotlib>=2.2.3",
+    "astropy>=3.1",
+    "numba>=0.40.0", # nopython mode features from 0.57.0 needed for fold_numba()
+    "dask>=0.19.0", # 2023.2.1 needed for dask.array.random.default_rng()
 ]
 
-[project.optional_dependencies]
+[project.optional-dependencies]
 cuda = [
     "cupy",
     "cuda-python",

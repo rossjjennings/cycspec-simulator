@@ -1,6 +1,3 @@
-import numba as nb
-
-@nb.njit
 def validate_stokes(I, Q=None, U=None, V=None):
     """
     Check that arrays representing Stokes parameters have compatible shapes,
@@ -23,7 +20,6 @@ def validate_stokes(I, Q=None, U=None, V=None):
         full_stokes = True
     return full_stokes, I.shape
 
-@nb.njit
 def coherence_to_stokes(AA, BB, CR, CI, feed_poln):
     """
     Convert coherence data to Stokes parameters, using the provided feed polarization

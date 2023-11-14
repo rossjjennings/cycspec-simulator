@@ -60,7 +60,7 @@ class BasebandModel:
             t_start = self.predictor.epoch
         dtype = np.dtype(dtype)
 
-        delayed = isinstance(self.rng, da.random.Generator)
+        delayed = hasattr(da.random, 'Generator') and isinstance(self.rng, da.random.Generator)
         t = get_time_axis(t_start, n_samples, self.chan_bw, delayed=delayed)
         phase = self.predictor.phase(t) - int(self.predictor.phase(t_start))
         binno = (phase*self.template.nbin).astype(dtype)
