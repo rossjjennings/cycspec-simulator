@@ -33,10 +33,10 @@ class TemplateProfile:
         hdul = fits.open(filename)
         data = hdul['SUBINT'].data['DATA']
 
-        if (nsub := data.shape[0]) != 1:
-            raise ValueError(f"Template should have 1 subintegration (found {nsub}).")
-        if (nchan := data.shape[2]) != 1:
-            raise ValueError(f"Template should have 1 channel (found {nchan}).")
+        if data.shape[0] != 1:
+            raise ValueError(f"Template should have 1 subintegration (found {data.shape[0]}).")
+        if data.shape[2] != 1:
+            raise ValueError(f"Template should have 1 channel (found {data.shape[2]}).")
 
         npol = data.shape[1]
         newshape = (1, npol, 1, 1)
