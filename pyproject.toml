@@ -16,7 +16,12 @@ dependencies = [
     "astropy>=4.0.4", # any python 3.9 compatibile version
     "numba>=0.57.0", # nopython mode features needed for fold_numba()
     "dask>=2023.2.1", # dask.array.random.default_rng()
-    "cuda-python" # for gpuinfo
+]
+
+[project.optional_dependencies]
+cuda = [
+    "cupy",
+    "cuda-python",
 ]
 
 [project.scripts]
