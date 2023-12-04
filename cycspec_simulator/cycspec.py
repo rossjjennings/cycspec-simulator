@@ -84,7 +84,36 @@ class NumbaThreads:
     def __exit__(self, type, value, traceback):
         nb.set_num_threads(self.n_threads_old)
 
-@nb.njit(parallel=True)
+signatures = [
+    nb.types.Tuple((
+        nb.complex64[:,:,:],
+        nb.complex64[:,:,:],
+        nb.complex64[:,:,:],
+        nb.complex64[:,:,:],
+        nb.int64[:,:,:]
+    ))(
+        nb.complex64[:,:],
+        nb.complex64[:,:],
+        nb.int64,
+        nb.int64,
+        nb.int64[:],
+    ),
+    nb.types.Tuple((
+        nb.complex128[:,:,:],
+        nb.complex128[:,:,:],
+        nb.complex128[:,:,:],
+        nb.complex128[:,:,:],
+        nb.int64[:,:,:]
+    ))(
+        nb.complex128[:,:],
+        nb.complex128[:,:],
+        nb.int64,
+        nb.int64,
+        nb.int64[:],
+    ),
+]
+
+@nb.njit(signatures, parallel=True)
 def _cycfold_cpu(A, B, nlag, nbin, binplan):
     nchan = A.shape[0]
     corr_AA = np.zeros((nchan, nlag, nbin), dtype=A.dtype)
