@@ -136,7 +136,8 @@ class BasebandData:
 
     @property
     def t(self):
-        return get_time_axis(self.start_time, self.n_samples, self.chan_bw, self.delayed)
+        sample_freq = np.abs(self.chan_bw)
+        return get_time_axis(self.start_time, self.n_samples, sample_freq, self.delayed)
 
     @property
     def nchan(self):
