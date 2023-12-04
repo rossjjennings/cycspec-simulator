@@ -135,7 +135,7 @@ def read_raw(filename, use_dask=True):
 
 def read(filename, use_dask=True):
     headers, data = read_raw(filename, use_dask=use_dask)
-    complex_data = data[..., 0] + 1j*data[..., 1]
+    complex_data = data[..., 0] + np.complex64(1j)*data[..., 1]
     A = complex_data[..., 0]
     B = complex_data[..., 0]
     start_time = Time(headers[0]['STT_IMJD'], headers[0]['STT_SMJD'], headers[0]['STT_OFFS'])
