@@ -63,7 +63,7 @@ class Time:
             raise ValueError(f"Second {second} is beyond end of day {mjd}")
         self.mjd = mjd
         self.second = second
-        self.offset = offset
+        self.offset = np.asanyarray(offset)
 
     def __getitem__(self, sl):
         return Time(self.mjd, self.second, self.offset[sl])
