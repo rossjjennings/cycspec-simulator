@@ -97,6 +97,7 @@ signatures = [
         nb.int64,
         nb.int64,
         nb.int64[:],
+        nb.boolean,
     ),
     nb.types.Tuple((
         nb.complex128[:,:,:],
@@ -110,11 +111,28 @@ signatures = [
         nb.int64,
         nb.int64,
         nb.int64[:],
+        nb.boolean,
     ),
 ]
 
 @nb.njit(signatures, parallel=True)
-def _cycfold_cpu(A, B, nlag, nbin, binplan):
+def corrfold_cpu(A, B, nlag, nbin, binplan, include_end=False):
+    """
+    Compute the cyclic autocorrelation function from sampled data.
+    This function is intended to be used internally by cycfold_cpu().
+
+    Parameters
+    ----------
+    A, B: Baseband samples in each of two polarizations (each of length n)
+    nlag: Number of lags to use for the correlation
+    nbin: Number of phase bins in which to accumulate
+    binplan: Array giving the phase bin corresponding to each half-sample time
+          (length 2*n - 1, where n is the number of samples)
+    include_end: Whether to calculate products where the first sample is among
+          the last nlag - ilag - 1 samples. In such cases, there are fewer than
+          nlag choices for the second sample. Setting include_end=True means that
+          slightly more samples will contribute to lower lags.
+    """
     nchan = A.shape[0]
     corr_AA = np.zeros((nchan, nlag, nbin), dtype=A.dtype)
     corr_AB = np.zeros((nchan, nlag, nbin), dtype=A.dtype)
@@ -123,7 +141,11 @@ def _cycfold_cpu(A, B, nlag, nbin, binplan):
     samples = np.zeros((nchan, nlag, nbin), dtype=np.int64)
     for ichan in range(nchan):
         for ilag in nb.prange(nlag):
-            ncorr = A.shape[1] - ilag
+            if include_end:
+                ncorr = A.shape[1] - ilag
+            else:
+                ncorr = A.shape[1] - nlag + 1
+
             for icorr in range(ncorr):
                 phase_bin = binplan[2*icorr + ilag]
                 samples[ichan, ilag, phase_bin] += 1
@@ -145,7 +167,23 @@ def _cycfold_cpu(A, B, nlag, nbin, binplan):
     corr_BB /= samples
     return corr_AA, corr_AB, corr_BA, corr_BB, samples
 
-def cycfold_cpu(data, ncyc, nbin, phase_predictor, n_threads=nb.config.NUMBA_NUM_THREADS):
+def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
+                n_threads=nb.config.NUMBA_NUM_THREADS):
+    """
+    Compute the periodic spectrum from sampled data.
+
+    Parameters
+    ----------
+    data: BasebandData object containing the data to use
+    ncyc: Number of "cyclic channels" per input channel
+    nbin: Number of phase bins in which to accumulate
+    phase_predictor: Predictor object to use in computing phases. Should have
+          a phase() method which can be called with a Time object to yield the
+          corresponding array of phases.
+    include_end: Passed along to corrfold_cpu(), see there for details.
+    n_threads: Number of CPU threads to use. Defaults to the total number of
+          available CPUs, as detected by Numba.
+    """
     nlag = ncyc//2 + 1
     offset = np.empty(2*data.t.offset.size - 1)
     offset[::2] = data.t.offset
@@ -155,8 +193,8 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, n_threads=nb.config.NUMBA_NUM
     binplan = np.int64(np.round((phase % 1)*nbin)) % nbin
     timer = CPUTimer()
     with timer, NumbaThreads(n_threads):
-        corr_AA, corr_AB, corr_BA, corr_BB, samples = _cycfold_cpu(
-            data.A, data.B, nlag, nbin, binplan
+        corr_AA, corr_AB, corr_BA, corr_BB, samples = corrfold_cpu(
+            data.A, data.B, nlag, nbin, binplan, include_end
         )
     print(f"Elapsed time: {timer.elapsed:g} ms")
     print(f"Total products accumulated: {4*np.sum(samples)}")

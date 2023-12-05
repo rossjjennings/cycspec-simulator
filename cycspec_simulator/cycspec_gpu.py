@@ -29,18 +29,56 @@ class CUDATimer:
         self.event_end.synchronize()
         self.elapsed = self.event_begin.elapsed_time(self.event_end)
 
-@cuda.jit((nb.complex64[:,:], nb.complex64[:,:], nb.int64, nb.int64[:], nb.int32[:],
-           nb.float32[:], nb.float32[:], nb.float32[:], nb.float32[:],
-           nb.float32[:], nb.float32[:], nb.float32[:], nb.float32[:]))
-def _cycfold_gpu(A, B, nbin, binplan, n_samples,
-                 AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag):
+@cuda.jit((
+    nb.complex64[:,:],
+    nb.complex64[:,:],
+    nb.int64,
+    nb.int64[:],
+    nb.int32[:],
+    nb.float32[:],
+    nb.float32[:],
+    nb.float32[:],
+    nb.float32[:],
+    nb.float32[:],
+    nb.float32[:],
+    nb.float32[:],
+    nb.float32[:],
+    nb.boolean,
+))
+def corrfold_gpu(A, B, nbin, binplan, n_samples,
+                 AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag,
+                 include_end=False):
+    """
+    Compute the cyclic autocorrelation function from sampled data, using CUDA.
+    This CUDA kernel is intended to be used internally by cycfold_gpu().
+
+    Parameters
+    ----------
+    A, B: Baseband samples in each of two polarizations (each of length n)
+    nbin: Number of phase bins in which to accumulate
+    binplan: Array giving the phase bin corresponding to each half-sample time
+          (length 2*n - 1, where n is the number of samples)
+    n_samples: Output array which will be used to hold the number of samples
+          accumulated into each phase bin for each lag.
+    AA_real, etc.: Output arrays which will be used to hold each of the polarization
+          components of the result, for both real and imaginary part.
+    include_end: Whether to calculate products where the first sample is among
+          the last nlag - ilag - 1 samples. In such cases, there are fewer than
+          nlag choices for the second sample. Setting include_end=True means that
+          slightly more samples will contribute to lower lags.
+    """
     ilag = cuda.blockIdx.x
     nlag = cuda.gridDim.x
     ichan = cuda.blockIdx.y
     ithread = cuda.threadIdx.x
     nthreads = cuda.blockDim.x
 
-    for icorr in range(ithread, A.shape[1] - ilag, nthreads):
+    if include_end:
+        ncorr = A.shape[1] - ilag
+    else:
+        ncorr = A.shape[1] - nlag + 1
+
+    for icorr in range(ithread, ncorr, nthreads):
         ibin = binplan[2*icorr + ilag]
         ibuf = ichan*nlag*nbin + ilag*nbin + ibin
         cuda.atomic.add(n_samples, ibuf, 1)
@@ -57,7 +95,20 @@ def _cycfold_gpu(A, B, nbin, binplan, n_samples,
         cuda.atomic.add(BB_real, ibuf, product_BB.real)
         cuda.atomic.add(BB_imag, ibuf, product_BB.imag)
 
-def cycfold_gpu(data, ncyc, nbin, phase_predictor):
+def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False):
+    """
+    Compute the periodic spectrum from sampled data, using CUDA.
+
+    Parameters
+    ----------
+    data: BasebandData object containing the data to use
+    ncyc: Number of "cyclic channels" per input channel
+    nbin: Number of phase bins in which to accumulate
+    phase_predictor: Predictor object to use in computing phases. Should have
+          a phase() method which can be called with a Time object to yield the
+          corresponding array of phases.
+    include_end: Passed along to corrfold_gpu(), see there for details.
+    """
     nlag = ncyc//2 + 1
     A_gpu = cupy.array(data.A)
     B_gpu = cupy.array(data.B)
@@ -83,9 +134,10 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor):
     stream = cuda.stream()
     with CUDATimer(stream) as cudatimer:
         cuda.profile_start()
-        _cycfold_gpu[(nlag, data.nchan), 512, stream](
+        corrfold_gpu[(nlag, data.nchan), 512, stream](
             A_gpu, B_gpu, nbin, binplan, n_samples,
-            AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag
+            AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag,
+            include_end,
         )
         cuda.profile_stop()
     print(f"Elapsed time: {cudatimer.elapsed:g} ms")
