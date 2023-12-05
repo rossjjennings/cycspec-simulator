@@ -13,9 +13,10 @@ class Time:
     A one-dimensional array of UTC time values, represented as an epoch,
     specified by an integer MJD and integer second, and a 64-bit
     floating-point offset from that epoch, in seconds.
-    Leap seconds are handled correctly for dates from 1972 through the
-    next leap second after 2016-12-31T23:59:60. Future dates are handled
-    assuming that no additional leap seconds will be inserted or removed.
+    Leap seconds are handled correctly as long as the Astropy leap second
+    table is up to date. For recently-inserted leap seconds, this may require
+    an internet connection. (But, as of December 2023, no new leap seconds
+    have been inserted since 2016-12-31T23:59:60.)
     """
     def __init__(self, mjd, second, offset):
         """
@@ -53,10 +54,12 @@ class Time:
     @classmethod
     def from_mjd(cls, mjd, smear_leapsec=False):
         """
-        Create a time object from a fractional MJD.
+        Create a Time object from a fractional MJD.
         The fractional part of the MJD is treated as (# of seconds)/86400
         unless the specified day includes a leap second _and_ `smear_leapsec`
         is `True`, in which case it is treated as (# of seconds)/86401.
+        With `smear_leapsec=False`, there are no inputs to this function
+        that produce times during a leap second.
 
         Setting `smear_leapsec=False` is consistent with TEMPO, Tempo2, and
         PINT's `PulsarMJD`, while `smear_leapsec=True` is consistent with
@@ -72,3 +75,23 @@ class Time:
         frac, second = np.modf(second)
         second = int(second)
         return cls(mjd, second, frac)
+
+    def to_mjd(self, smear_leapsec=False):
+        """
+        Convert a Time object into a fractional MJD.
+        The fractional part of the MJD is derived as (# of seconds)/86400
+        unless the specified day includes a leap second _and_ `smear_leapsec`
+        is `True`, in which case it is derived as (# of seconds)/86401.
+        With `smear_leapsec=False`, times during a leap second will be
+        converted into times during the first second of the next day.
+
+        Setting `smear_leapsec=False` is consistent with TEMPO, Tempo2, and
+        PINT's `PulsarMJD`, while `smear_leapsec=True` is consistent with
+        IAU SOFA and is the default behavior of Astropy. For context, see
+        https://github.com/astropy/astropy/issues/5369.
+        """
+        if smear_leapsec and int(mjd) in leapsec_mjds:
+            seconds_in_day = 86401
+        else:
+            seconds_in_day = 86400
+        return self.mjd + (self.second + self.offset)/seconds_in_day
