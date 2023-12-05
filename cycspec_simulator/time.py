@@ -1,40 +1,12 @@
 import numpy as np
 import numba as nb
-import astropy.time
+from astropy.utils.iers import LeapSeconds
 
-# Days with leap seconds. Current through at least 2024-06-28.
-# For updates, see https://hpiers.obspm.fr/iers/bul/bulc/Leap_Second.dat
-# But note: that file gives the day _after_ the leap second.
-leapsec_mjds = np.array([
-    41316, # 1971-12-31
-    41498, # 1972-06-30
-    41682, # 1972-12-31
-    42047, # 1973-12-31
-    42412, # 1974-12-31
-    42777, # 1975-12-31
-    43143, # 1976-12-31
-    43508, # 1977-12-31
-    43873, # 1978-12-31
-    44238, # 1979-12-31
-    44785, # 1981-06-30
-    45150, # 1982-06-30
-    45515, # 1983-06-30
-    46246, # 1985-06-30
-    47160, # 1987-12-31
-    47891, # 1989-12-31
-    48256, # 1990-12-31
-    48803, # 1992-06-30
-    49168, # 1993-06-30
-    49533, # 1994-06-30
-    50082, # 1995-12-31
-    50629, # 1997-06-30
-    51178, # 1998-12-31
-    53735, # 2005-12-31
-    54831, # 2008-12-31
-    56108, # 2012-06-30
-    57203, # 2015-06-30
-    57753, # 2016-12-31
-])
+# Get the list of leap seconds from Astropy.
+# It is updated automatically from the official IERS table at
+#   https://hpiers.obspm.fr/iers/bul/bulc/Leap_Second.dat.
+# That file gives the day _after_ the leap second, so we subtract 1 here.
+leapsec_mjds = LeapSeconds.auto_open()['mjd'].astype('int64') - 1
 
 class Time:
     """
