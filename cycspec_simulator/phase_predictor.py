@@ -6,19 +6,46 @@ from .time import Time
 
 class FreqOnlyPredictor:
     def __init__(self, f0, epoch):
+        """
+        Create a phase predictor based on a fixed frequency.
+
+        Parameters
+        ----------
+        f0: Pulse frequency (Hz)
+        epoch: Time at which the phase is zero.
+        """
         self.f0 = f0
         self.epoch = epoch
 
     def phase(self, t):
+        """
+        Calculate the phase for a given time (possibly an array).
+        """
         return self.f0*(t - self.epoch)
 
 class PolynomialPredictor:
     def __init__(self, segments):
+        """
+        Create a phase predictor based on multiple segments, each described by
+        a Taylor polynomial.
+
+        Parameters
+        ----------
+        segments: List of `PolynomialSegment` objects representing the segments.
+        """
         self.segments = segments
         self.epoch = segments[0].epoch
 
     @classmethod
     def parse(cls, lines):
+        """
+        Parse lines from a TEMPO `polyco.dat` file, potentially containing
+        multiple segments.
+
+        Parameters
+        ----------
+        lines: List of lines from the file.
+        """
         i = 0
         segments = []
         while i < len(lines):
@@ -50,30 +77,80 @@ class PolynomialPredictor:
 
     @classmethod
     def from_file(cls, filename):
+        """
+        Create a phase predictor based on a TEMPO `polyco.dat` file.
+
+        Parameters
+        ----------
+        filename: Path to the polyco file.
+        """
         with open(filename, 'r') as f:
             lines = f.readlines()
         return cls.parse(lines)
 
     def closest_segment(self, t):
+        """
+        Determine the sement whose center is closest to a particular time.
+        Broadcasts over arrays.
+        """
         diffs = np.array([t - segment.epoch for segment in self.segments])
         closest_segment = np.argmin(np.abs(diffs), axis=0)
         return closest_segment
 
     def covers(self, t):
+        """
+        Determine whether any segment covers a particular time.
+        Broadcasts over arrays.
+        """
         return np.any([segment.covers(t) for segment in self.segments], axis=0)
 
-    def phase(self, t, check_bounds=True):
+    def phase(self, t, check_bounds=True, reduce_refphase=True):
+        """
+        Calculate the phase at a particular time. The phase is calculated based on
+        the closest segment to the time at which it is being evaluated.
+
+        Parameters
+        ----------
+        t: Time at which to calculate the phase.
+        check_bounds: Whether to raise an error if any times are out of bounds,
+                      or just extrapolate based on the closest segment.
+        reduce_refphase: Whether to reduce the reference phase modulo 1 before
+                         computing the phase. This will bring the phase closer to
+                         zero by a whole number of turns, increasing the precision
+                         that can be retained in the fractional part.
+        """
         closest_segment = self.closest_segment(t)
         phase = np.empty_like(t.offset)
         for i, segment in enumerate(self.segments):
             sl = (closest_segment == i)
-            phase[sl] = segment.phase(t[sl], check_bounds)
+            phase[sl] = segment.phase(t[sl], check_bounds, reduce_refphase)
 
         return phase[()] # turns 0d arrays into scalars, otherwise harmless
 
 class PolynomialSegment:
     def __init__(self, span, site, epoch, ref_freq, ref_phase, ref_f0, coeffs,
                  start_phase=0., date_produced='', version='', log10_fit_err=0.):
+        """
+        Create a phase predictor based on a single segment in which the phase
+        can be described by a Taylor polynomial as a function of time.
+
+        Parameters
+        ----------
+        span: Time span of the segment (minutes)
+        site: Observatory code indicating the location where the function is valid
+        epoch: Time at which the phase is zero
+        ref_freq: Reference radio frequency at which the phase is evaluated
+        ref_f0: Reference pulse frequency at the epoch
+        coeffs: Coefficients of powers of (t-epoch) in the Taylor polynomial.
+                `coeffs[k]` the coefficient of (t-epoch)**k.
+        start_phase: Phase at the epoch
+
+        Additional metadata (stored but not used)
+        -----------------------------------------
+        date_produced: Date when the approximate phase function was produced
+        version: Version of Tempo used to produce the approximation
+        log10_fit_err: Base-10 logarithm of the approximation error
+        """
         self.date_produced = date_produced
         self.version = version
         self.span = span
@@ -88,6 +165,10 @@ class PolynomialSegment:
 
     @classmethod
     def from_record(cls, rec):
+        """
+        Create a `PolynomialSegment` from a record in a FITS HDU, such as might
+        be found in the 'POLYCO' HDU of a PSRFITS file.
+        """
         return cls(
             span = rec['NSPAN'],
             site = rec['NSITE'],
@@ -102,12 +183,36 @@ class PolynomialSegment:
             log10_fit_err = rec['LGFITERR'],
         )
 
-    def phase(self, t, check_bounds=True):
+    def phase(self, t, check_bounds=True, reduce_refphase=True):
+        """
+        Calculate the phase at a particular time.
+
+        Parameters
+        ----------
+        t: Time at which to calculate the phase.
+        check_bounds: Whether to raise an error if any times are out of bounds,
+                      or extrapolate beyond the bounds of the segment.
+        reduce_refphase: Whether to reduce the reference phase modulo 1 before
+                         computing the phase. This will bring the phase closer to
+                         zero by a whole number of turns, increasing the precision
+                         that can be retained in the fractional part.
+        """
         dt = self.dt(t, check_bounds)
-        phase = self.ref_phase + dt*60*self.ref_f0 + polynomial.polyval(dt, self.coeffs)
+        ref_phase = (self.ref_phase % 1) if reduce_refphase else self.ref_phase
+        phase = ref_phase + dt*60*self.ref_f0 + polynomial.polyval(dt, self.coeffs)
         return phase
 
     def dphase(self, t, check_bounds=True, ref_time=None):
+        """
+        Calculate the difference in phase between the epoch and a particular time.
+
+        Parameters
+        ----------
+        t: Time at which to calculate the phase difference.
+        check_bounds: Whether to raise an error if any times are out of bounds,
+                      or extrapolate beyond the bounds of the segment.
+        ref_time: If specified, substitute this time for the epoch.
+        """
         dt = self.dt(t, check_bounds)
         if ref_time is None:
             phase = dt*60*self.ref_f0 + polynomial.polyval(dt, self.coeffs)
@@ -119,6 +224,16 @@ class PolynomialSegment:
         return phase
 
     def f0(self, t, check_bounds=True):
+        """
+        Calculate the pulse frequency at a particular time.
+
+        Parameters
+        ----------
+        t: Time at which to calculate the pulse frequency.
+        check_bounds: Whether to raise an error if any times are out of bounds,
+                      or extrapolate beyond the bounds of the segment.
+        ref_time: If specified, substitute this reference time for the epoch.
+        """
         dt = self.dt(t, check_bounds)
 
         der_coeffs = polynomial.polyder(self.coeffs)
@@ -126,10 +241,23 @@ class PolynomialSegment:
         return f0
 
     def covers(self, t):
+        """
+        Determine whether this segment covers a particular time.
+        Broadcasts over arrays.
+        """
         dt = (t - self.epoch)/60 # minutes
         return np.abs(dt) <= self.span/2
 
     def dt(self, t, check_bounds=True):
+        """
+        Calculate the difference in time between `t` and the epoch, or raise an
+        error if `t` is outside the bounds of this segment.
+
+        Parameters
+        ----------
+        t: Specified time (possibly an array).
+        check_bounds: Whether to raise an error if any times are out of bounds.
+        """
         dt = (t - self.epoch)/60 # minutes
         if check_bounds:
             not_covered = ~self.covers(t)
