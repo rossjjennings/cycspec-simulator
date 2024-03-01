@@ -11,8 +11,8 @@ def complex_white_noise(shape, rng, dtype):
     return (real + 1j*imag)/np.sqrt(2)
 
 class BasebandModel:
-    def __init__(self, template, predictor, chan_bw, nchan=1, obsfreq=0,
-                 noise_level=0, feed_poln='LIN', rng=None):
+    def __init__(self, template, predictor, bandwidth, filters=None,
+                 obsfreq=0, noise_level=0, feed_poln='LIN', rng=None):
         """
         Create a new model for generating simulated baseband data.
 
@@ -20,10 +20,10 @@ class BasebandModel:
         ----------
         template: TemplateProfile object representing the pulse profile.
         predictor: Pulse phase predictor.
-        chan_bw: Channel bandwidth of simulated data (same units as `pulse_freq`).
+        bandwidth: Bandwidth of simulated data (same units as `pulse_freq`).
         nchan: Number of channels in simulated data.
         obsfreq: Observing frequency (used in plotting and headers only, same
-                 units as `chan_bw`).
+                 units as `bandwidth`).
         noise_level: Noise variance in intensity units.
         feed_poln: Feed polarization ('LIN' for linear or 'CIRC' for circular).
         rng: Random number generator. Expected to be a `np.random.Generator`.
@@ -32,8 +32,7 @@ class BasebandModel:
         """
         self.template = template
         self.predictor = predictor
-        self.chan_bw = chan_bw
-        self.nchan = nchan
+        self.bandwidth = bandwidth
         self.obsfreq = obsfreq
         self.noise_level = noise_level
         self.feed_poln = feed_poln.upper()
@@ -61,14 +60,13 @@ class BasebandModel:
         dtype = np.dtype(dtype)
 
         delayed = hasattr(da.random, 'Generator') and isinstance(self.rng, da.random.Generator)
-        t = get_time_axis(t_start, n_samples, self.chan_bw, delayed=delayed)
+        t = get_time_axis(t_start, n_samples, self.bandwidth, delayed=delayed)
         phase = self.predictor.phase(t) - int(self.predictor.phase(t_start))
         binno = (phase*self.template.nbin).astype(dtype)
         I = interp(self.template.I, binno)
-        shape = (self.nchan, n_samples)
-        noise1 = complex_white_noise(shape, self.rng, dtype)
-        noise2 = complex_white_noise(shape, self.rng, dtype)
-        noise3 = complex_white_noise(shape, self.rng, dtype)
+        noise1 = complex_white_noise(n_samples, self.rng, dtype)
+        noise2 = complex_white_noise(n_samples, self.rng, dtype)
+        noise3 = complex_white_noise(n_samples, self.rng, dtype)
         if self.template.full_stokes:
             Q = interp(self.template.Q, binno)
             U = interp(self.template.U, binno)
@@ -78,19 +76,19 @@ class BasebandModel:
                 Y = (U - 1j*V)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
                 Y /= np.sqrt(2*(I + Q))
                 Y += np.sqrt(self.noise_level)*noise3
-                return BasebandData(X, Y, t_start, 'LIN', self.chan_bw, self.obsfreq)
+                return BasebandData(X, Y, t_start, 'LIN', self.bandwidth, self.obsfreq)
             elif self.feed_poln == 'CIRC':
                 L = np.sqrt((I + V)/2)*noise1 + np.sqrt(self.noise_level)*noise3
                 R = (Q - 1j*U)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
                 R /= np.sqrt(2*(I + V))
                 R += np.sqrt(self.noise_level)*noise3
-                return BasebandData(L, R, t_start, 'CIRC', self.chan_bw, self.obsfreq)
+                return BasebandData(L, R, t_start, 'CIRC', self.bandwidth, self.obsfreq)
             else:
                 raise ValueError(f"Invalid polarization type '{self.feed_poln}'.")
         else:
             A = np.sqrt(I/2)*noise1 + np.sqrt(self.noise_level)*noise3
             B = np.sqrt(I/2)*noise2 + np.sqrt(self.noise_level)*noise3
-            return BasebandData(A, B, t_start, self.feed_poln, self.chan_bw, self.obsfreq)
+            return BasebandData(A, B, t_start, self.feed_poln, self.bandwidth, self.obsfreq)
         return X, Y
 
     def sample_time(self, duration, phase_start=0, interp=lerp):
@@ -138,10 +136,6 @@ class BasebandData:
     def t(self):
         sample_freq = np.abs(self.chan_bw)
         return get_time_axis(self.start_time, self.n_samples, sample_freq, self.delayed)
-
-    @property
-    def nchan(self):
-        return self.A.shape[0]
 
     def compute_all(self):
         if self.delayed:
