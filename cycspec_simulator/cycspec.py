@@ -86,28 +86,28 @@ class NumbaThreads:
 
 signatures = [
     nb.types.Tuple((
-        nb.complex64[:,:,:],
-        nb.complex64[:,:,:],
-        nb.complex64[:,:,:],
-        nb.complex64[:,:,:],
-        nb.int64[:,:,:]
+        nb.complex64[:,:],
+        nb.complex64[:,:],
+        nb.complex64[:,:],
+        nb.complex64[:,:],
+        nb.int64[:,:]
     ))(
-        nb.complex64[:,:],
-        nb.complex64[:,:],
+        nb.complex64[:],
+        nb.complex64[:],
         nb.int64,
         nb.int64,
         nb.int64[:],
         nb.boolean,
     ),
     nb.types.Tuple((
-        nb.complex128[:,:,:],
-        nb.complex128[:,:,:],
-        nb.complex128[:,:,:],
-        nb.complex128[:,:,:],
-        nb.int64[:,:,:]
+        nb.complex128[:,:],
+        nb.complex128[:,:],
+        nb.complex128[:,:],
+        nb.complex128[:,:],
+        nb.int64[:,:]
     ))(
-        nb.complex128[:,:],
-        nb.complex128[:,:],
+        nb.complex128[:],
+        nb.complex128[:],
         nb.int64,
         nb.int64,
         nb.int64[:],
@@ -134,33 +134,32 @@ def corrfold_cpu(A, B, nlag, nbin, binplan, include_end=False):
           slightly more samples will contribute to lower lags.
     """
     nchan = A.shape[0]
-    corr_AA = np.zeros((nchan, nlag, nbin), dtype=A.dtype)
-    corr_AB = np.zeros((nchan, nlag, nbin), dtype=A.dtype)
-    corr_BA = np.zeros((nchan, nlag, nbin), dtype=A.dtype)
-    corr_BB = np.zeros((nchan, nlag, nbin), dtype=A.dtype)
-    samples = np.zeros((nchan, nlag, nbin), dtype=np.int64)
-    for ichan in range(nchan):
-        for ilag in nb.prange(nlag):
-            if include_end:
-                ncorr = A.shape[1] - ilag
-            else:
-                ncorr = A.shape[1] - nlag + 1
+    corr_AA = np.zeros((nlag, nbin), dtype=A.dtype)
+    corr_AB = np.zeros((nlag, nbin), dtype=A.dtype)
+    corr_BA = np.zeros((nlag, nbin), dtype=A.dtype)
+    corr_BB = np.zeros((nlag, nbin), dtype=A.dtype)
+    samples = np.zeros((nlag, nbin), dtype=np.int64)
+    for ilag in nb.prange(nlag):
+        if include_end:
+            ncorr = A.size - ilag
+        else:
+            ncorr = A.size - nlag + 1
 
-            for icorr in range(ncorr):
-                phase_bin = binplan[2*icorr + ilag]
-                samples[ichan, ilag, phase_bin] += 1
-                corr_AA[ichan, ilag, phase_bin] += (
-                    A[ichan, icorr + ilag] * A[ichan, icorr].conjugate()
-                )
-                corr_AB[ichan, ilag, phase_bin] += (
-                    A[ichan, icorr + ilag] * B[ichan, icorr].conjugate()
-                )
-                corr_BA[ichan, ilag, phase_bin] += (
-                    B[ichan, icorr + ilag] * A[ichan, icorr].conjugate()
-                )
-                corr_BB[ichan, ilag, phase_bin] += (
-                    B[ichan, icorr + ilag] * B[ichan, icorr].conjugate()
-                )
+        for icorr in range(ncorr):
+            phase_bin = binplan[2*icorr + ilag]
+            samples[ilag, phase_bin] += 1
+            corr_AA[ilag, phase_bin] += (
+                A[icorr + ilag] * A[icorr].conjugate()
+            )
+            corr_AB[ilag, phase_bin] += (
+                A[icorr + ilag] * B[icorr].conjugate()
+            )
+            corr_BA[ilag, phase_bin] += (
+                B[icorr + ilag] * A[icorr].conjugate()
+            )
+            corr_BB[ilag, phase_bin] += (
+                B[icorr + ilag] * B[icorr].conjugate()
+            )
     corr_AA /= samples
     corr_AB /= samples
     corr_BA /= samples
@@ -200,19 +199,15 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
     print(f"Total products accumulated: {4*np.sum(samples)}")
     throughput = 4*np.sum(samples)/(timer.elapsed/1000)
     print(f"Throughput: {throughput:g} products/sec.")
+    print(corr_AA.shape)
     corr_CR = (corr_AB + corr_BA)/2
     corr_CI = (corr_AB - corr_BA)/2j
-    pspec_AA = np.fft.fftshift(np.fft.hfft(corr_AA, axis=1), axes=1)
-    pspec_AA = pspec_AA.reshape(data.nchan*ncyc, nbin)
-    pspec_BB = np.fft.fftshift(np.fft.hfft(corr_BB, axis=1), axes=1)
-    pspec_BB = pspec_BB.reshape(data.nchan*ncyc, nbin)
-    pspec_CR = np.fft.fftshift(np.fft.hfft(corr_CR, axis=1), axes=1)
-    pspec_CR = pspec_CR.reshape(data.nchan*ncyc, nbin)
-    pspec_CI = np.fft.fftshift(np.fft.hfft(corr_CI, axis=1), axes=1)
-    pspec_CI = pspec_CI.reshape(data.nchan*ncyc, nbin)
-    bandwidth = data.nchan*data.chan_bw
-    nfreq = data.nchan*ncyc
-    freq = data.obsfreq + np.linspace(-bandwidth/2, bandwidth/2, nfreq, endpoint=False)
+    pspec_AA = np.fft.fftshift(np.fft.hfft(corr_AA, axis=0), axes=0)
+    pspec_BB = np.fft.fftshift(np.fft.hfft(corr_BB, axis=0), axes=0)
+    pspec_CR = np.fft.fftshift(np.fft.hfft(corr_CR, axis=0), axes=0)
+    pspec_CI = np.fft.fftshift(np.fft.hfft(corr_CI, axis=0), axes=0)
+    bandwidth = data.bandwidth
+    freq = data.obsfreq + np.linspace(-bandwidth/2, bandwidth/2, ncyc, endpoint=False)
 
     I, Q, U, V = coherence_to_stokes(
         pspec_AA,

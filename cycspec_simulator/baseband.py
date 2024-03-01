@@ -33,6 +33,9 @@ class BasebandModel:
         self.template = template
         self.predictor = predictor
         self.bandwidth = bandwidth
+        if filters is None:
+            filters = []
+        self.filters = filters
         self.obsfreq = obsfreq
         self.noise_level = noise_level
         self.feed_poln = feed_poln.upper()
@@ -40,6 +43,16 @@ class BasebandModel:
             self.rng = np.random.default_rng()
         else:
             self.rng = rng
+
+    def add_filter(self, filtr):
+        """
+        Add a filter to be applied to the modeled baseband time series.
+
+        Parameters
+        ----------
+        filtr: The filter to apply. Should be a LinearFilter object.
+        """
+        self.filters.append(filtr)
 
     def sample(self, n_samples, t_start=None, interp=lerp, dtype=np.float32):
         """
@@ -59,6 +72,9 @@ class BasebandModel:
             t_start = self.predictor.epoch
         dtype = np.dtype(dtype)
 
+        for filtr in self.filters:
+            n_samples += filtr.n_samples - 1
+
         delayed = hasattr(da.random, 'Generator') and isinstance(self.rng, da.random.Generator)
         t = get_time_axis(t_start, n_samples, self.bandwidth, delayed=delayed)
         phase = self.predictor.phase(t) - int(self.predictor.phase(t_start))
@@ -72,24 +88,28 @@ class BasebandModel:
             U = interp(self.template.U, binno)
             V = interp(self.template.V, binno)
             if self.feed_poln == 'LIN':
-                X = np.sqrt((I + Q)/2)*noise1 + np.sqrt(self.noise_level)*noise3
+                X = np.sqrt((I + Q)/2)*noise1
                 Y = (U - 1j*V)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
                 Y /= np.sqrt(2*(I + Q))
-                Y += np.sqrt(self.noise_level)*noise3
-                return BasebandData(X, Y, t_start, 'LIN', self.bandwidth, self.obsfreq)
+                A, B = X, Y
             elif self.feed_poln == 'CIRC':
-                L = np.sqrt((I + V)/2)*noise1 + np.sqrt(self.noise_level)*noise3
+                L = np.sqrt((I + V)/2)*noise1
                 R = (Q - 1j*U)*noise1 + np.sqrt(I*I - Q*Q - U*U - V*V)*noise2
                 R /= np.sqrt(2*(I + V))
-                R += np.sqrt(self.noise_level)*noise3
-                return BasebandData(L, R, t_start, 'CIRC', self.bandwidth, self.obsfreq)
+                A, B = L, R
             else:
                 raise ValueError(f"Invalid polarization type '{self.feed_poln}'.")
         else:
-            A = np.sqrt(I/2)*noise1 + np.sqrt(self.noise_level)*noise3
-            B = np.sqrt(I/2)*noise2 + np.sqrt(self.noise_level)*noise3
-            return BasebandData(A, B, t_start, self.feed_poln, self.bandwidth, self.obsfreq)
-        return X, Y
+            A = np.sqrt(I/2)*noise1
+            B = np.sqrt(I/2)*noise2
+
+        data = BasebandData(A, B, t_start, self.feed_poln, self.bandwidth, self.obsfreq)
+        for filtr in self.filters:
+            data = filtr.apply(data)
+        A += np.sqrt(self.noise_level)*noise3
+        B += np.sqrt(self.noise_level)*noise3
+
+        return data
 
     def sample_time(self, duration, phase_start=0, interp=lerp):
         """
@@ -104,7 +124,7 @@ class BasebandModel:
                 evaluate the interpolated function (extended periodically).
                 `fft_interp` and `lerp` (the default) both work.
         """
-        n_samples = np.int64(duration*self.chan_bw)
+        n_samples = np.int64(duration*self.bandwidth)
         return sample(n_samples, phase_start, interp)
 
 def get_time_axis(start_time, n_samples, bandwidth, delayed=False):
@@ -120,7 +140,7 @@ def get_time_axis(start_time, n_samples, bandwidth, delayed=False):
     )
 
 class BasebandData:
-    def __init__(self, A, B, start_time, feed_poln, chan_bw, obsfreq):
+    def __init__(self, A, B, start_time, feed_poln, bandwidth, obsfreq):
         if not B.shape == A.shape:
             raise ValueError(f"A and B should be the same shape! Found: {A.shape} != {B.shape}")
         self.A = A
@@ -129,12 +149,12 @@ class BasebandData:
         self.delayed = isinstance(A, da.Array)
         self.start_time = start_time
         self.feed_poln = feed_poln.upper()
-        self.chan_bw = chan_bw
+        self.bandwidth = bandwidth
         self.obsfreq = obsfreq
 
     @property
     def t(self):
-        sample_freq = np.abs(self.chan_bw)
+        sample_freq = np.abs(self.bandwidth)
         return get_time_axis(self.start_time, self.n_samples, sample_freq, self.delayed)
 
     def compute_all(self):
