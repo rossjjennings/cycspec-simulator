@@ -67,6 +67,7 @@ class BasebandModel:
                 a template array and an array of sample points at which to
                 evaluate the interpolated function (extended periodically).
                 `fft_interp` and `lerp` (the default) both work.
+        dtype: Numpy dtype to use for samples.
         """
         if t_start is None:
             t_start = self.predictor.epoch
@@ -82,7 +83,6 @@ class BasebandModel:
         I = interp(self.template.I, binno)
         noise1 = complex_white_noise(n_samples, self.rng, dtype)
         noise2 = complex_white_noise(n_samples, self.rng, dtype)
-        noise3 = complex_white_noise(n_samples, self.rng, dtype)
         if self.template.full_stokes:
             Q = interp(self.template.Q, binno)
             U = interp(self.template.U, binno)
@@ -106,8 +106,10 @@ class BasebandModel:
         data = BasebandData(A, B, t_start, self.feed_poln, self.bandwidth, self.obsfreq)
         for filtr in self.filters:
             data = filtr.apply(data)
-        A += np.sqrt(self.noise_level)*noise3
-        B += np.sqrt(self.noise_level)*noise3
+
+        noise3 = complex_white_noise(data.n_samples, self.rng, dtype)
+        data.A += np.sqrt(self.noise_level)*noise3
+        data.B += np.sqrt(self.noise_level)*noise3
 
         return data
 

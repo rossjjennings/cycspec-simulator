@@ -199,7 +199,6 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
     print(f"Total products accumulated: {4*np.sum(samples)}")
     throughput = 4*np.sum(samples)/(timer.elapsed/1000)
     print(f"Throughput: {throughput:g} products/sec.")
-    print(corr_AA.shape)
     corr_CR = (corr_AB + corr_BA)/2
     corr_CI = (corr_AB - corr_BA)/2j
     pspec_AA = np.fft.fftshift(np.fft.hfft(corr_AA, axis=0), axes=0)
