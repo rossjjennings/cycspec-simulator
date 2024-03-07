@@ -30,8 +30,8 @@ class CUDATimer:
         self.elapsed = self.event_begin.elapsed_time(self.event_end)
 
 @cuda.jit((
-    nb.complex64[:,:],
-    nb.complex64[:,:],
+    nb.complex64[:],
+    nb.complex64[:],
     nb.int64,
     nb.int64[:],
     nb.int32[:],
@@ -69,29 +69,28 @@ def corrfold_gpu(A, B, nbin, binplan, n_samples,
     """
     ilag = cuda.blockIdx.x
     nlag = cuda.gridDim.x
-    ichan = cuda.blockIdx.y
     ithread = cuda.threadIdx.x
     nthreads = cuda.blockDim.x
 
     if include_end:
-        ncorr = A.shape[1] - ilag
+        ncorr = A.size - ilag
     else:
-        ncorr = A.shape[1] - nlag + 1
+        ncorr = A.size - nlag + 1
 
     for icorr in range(ithread, ncorr, nthreads):
         ibin = binplan[2*icorr + ilag]
-        ibuf = ichan*nlag*nbin + ilag*nbin + ibin
+        ibuf = ilag*nbin + ibin
         cuda.atomic.add(n_samples, ibuf, 1)
-        product_AA = (A[ichan, icorr + ilag] * A[ichan, icorr].conjugate())
+        product_AA = (A[icorr + ilag] * A[icorr].conjugate())
         cuda.atomic.add(AA_real, ibuf, product_AA.real)
         cuda.atomic.add(AA_imag, ibuf, product_AA.imag)
-        product_AB = (A[ichan, icorr + ilag] * B[ichan, icorr].conjugate())
+        product_AB = (A[icorr + ilag] * B[icorr].conjugate())
         cuda.atomic.add(AB_real, ibuf, product_AB.real)
         cuda.atomic.add(AB_imag, ibuf, product_AB.imag)
-        product_BA = (B[ichan, icorr + ilag] * A[ichan, icorr].conjugate())
+        product_BA = (B[icorr + ilag] * A[icorr].conjugate())
         cuda.atomic.add(BA_real, ibuf, product_BA.real)
         cuda.atomic.add(BA_imag, ibuf, product_BA.imag)
-        product_BB = (B[ichan, icorr + ilag] * B[ichan, icorr].conjugate())
+        product_BB = (B[icorr + ilag] * B[icorr].conjugate())
         cuda.atomic.add(BB_real, ibuf, product_BB.real)
         cuda.atomic.add(BB_imag, ibuf, product_BB.imag)
 
@@ -109,6 +108,7 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False):
           corresponding array of phases.
     include_end: Passed along to corrfold_gpu(), see there for details.
     """
+    print(f"Input dtype : {data.A.dtype}")
     nlag = ncyc//2 + 1
     A_gpu = cupy.array(data.A)
     B_gpu = cupy.array(data.B)
@@ -122,19 +122,19 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False):
     binplan = np.int64(np.round((phase % 1)*nbin)) % nbin
     binplan = cupy.array(binplan)
 
-    n_samples = cupy.zeros(data.nchan*nlag*nbin, dtype=np.int32)
-    AA_real = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    AA_imag = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    AB_real = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    AB_imag = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    BA_real = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    BA_imag = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    BB_real = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    BB_imag = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
+    n_samples = cupy.zeros(nlag*nbin, dtype=np.int32)
+    AA_real = cupy.zeros(nlag*nbin, dtype=np.float32)
+    AA_imag = cupy.zeros(nlag*nbin, dtype=np.float32)
+    AB_real = cupy.zeros(nlag*nbin, dtype=np.float32)
+    AB_imag = cupy.zeros(nlag*nbin, dtype=np.float32)
+    BA_real = cupy.zeros(nlag*nbin, dtype=np.float32)
+    BA_imag = cupy.zeros(nlag*nbin, dtype=np.float32)
+    BB_real = cupy.zeros(nlag*nbin, dtype=np.float32)
+    BB_imag = cupy.zeros(nlag*nbin, dtype=np.float32)
     stream = cuda.stream()
     with CUDATimer(stream) as cudatimer:
         cuda.profile_start()
-        corrfold_gpu[(nlag, data.nchan), 512, stream](
+        corrfold_gpu[nlag, 512, stream](
             A_gpu, B_gpu, nbin, binplan, n_samples,
             AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag,
             include_end,
@@ -146,24 +146,23 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False):
     print(f"Throughput: {throughput:g} products/sec.")
 
     AA = (AA_real + 1j*AA_imag)/n_samples
-    AA = AA.reshape(data.nchan, nlag, nbin)
+    AA = AA.reshape(nlag, nbin)
     BB = (BB_real + 1j*BB_imag)/n_samples
-    BB = BB.reshape(data.nchan, nlag, nbin)
+    BB = BB.reshape(nlag, nbin)
     CR = (AB_real + BA_real + 1j*(AB_imag + BA_imag))/(2*n_samples)
-    CR = CR.reshape(data.nchan, nlag, nbin)
+    CR = CR.reshape(nlag, nbin)
     CI = (AB_real - BA_real + 1j*(AB_imag - BA_imag))/(2j*n_samples)
-    CI = CI.reshape(data.nchan, nlag, nbin)
-    pspec_AA = np.fft.fftshift(np.fft.hfft(AA.get(), axis=1), axes=1)
-    pspec_AA = pspec_AA.reshape(data.nchan*ncyc, nbin)
-    pspec_BB = np.fft.fftshift(np.fft.hfft(BB.get(), axis=1), axes=1)
-    pspec_BB = pspec_BB.reshape(data.nchan*ncyc, nbin)
-    pspec_CR = np.fft.fftshift(np.fft.hfft(CR.get(), axis=1), axes=1)
-    pspec_CR = pspec_CR.reshape(data.nchan*ncyc, nbin)
-    pspec_CI = np.fft.fftshift(np.fft.hfft(CI.get(), axis=1), axes=1)
-    pspec_CI = pspec_CI.reshape(data.nchan*ncyc, nbin)
-    bandwidth = data.nchan*data.chan_bw
-    nfreq = data.nchan*ncyc
-    freq = data.obsfreq + np.linspace(-bandwidth/2, bandwidth/2, nfreq, endpoint=False)
+    CI = CI.reshape(nlag, nbin)
+    pspec_AA = np.fft.fftshift(np.fft.hfft(AA.get(), axis=0), axes=0)
+    pspec_AA = pspec_AA.reshape(ncyc, nbin)
+    pspec_BB = np.fft.fftshift(np.fft.hfft(BB.get(), axis=0), axes=0)
+    pspec_BB = pspec_BB.reshape(ncyc, nbin)
+    pspec_CR = np.fft.fftshift(np.fft.hfft(CR.get(), axis=0), axes=0)
+    pspec_CR = pspec_CR.reshape(ncyc, nbin)
+    pspec_CI = np.fft.fftshift(np.fft.hfft(CI.get(), axis=0), axes=0)
+    pspec_CI = pspec_CI.reshape(ncyc, nbin)
+    bandwidth = data.bandwidth
+    freq = data.obsfreq + np.linspace(-bandwidth/2, bandwidth/2, ncyc, endpoint=False)
 
     I, Q, U, V = coherence_to_stokes(
         pspec_AA,

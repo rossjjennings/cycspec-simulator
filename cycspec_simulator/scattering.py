@@ -146,8 +146,11 @@ class ScatteringFilter(LinearFilter):
         new_size = data.A.size - self.impulse_response.size + 1
         A_new = np.empty(new_size, data.A.dtype)
         B_new = np.empty(new_size, data.B.dtype)
-        A_new = convolve(data.A, self.impulse_response, mode='valid')
-        B_new = convolve(data.B, self.impulse_response, mode='valid')
+
+        # If data is 32-bit, keep it that way
+        irf = self.impulse_response.astype(data.A.dtype)
+        A_new = convolve(data.A, irf, mode='valid')
+        B_new = convolve(data.B, irf, mode='valid')
         return BasebandData(
             A_new,
             B_new,

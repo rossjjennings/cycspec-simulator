@@ -108,8 +108,8 @@ class BasebandModel:
             data = filtr.apply(data)
 
         noise3 = complex_white_noise(data.n_samples, self.rng, dtype)
-        data.A += np.sqrt(self.noise_level)*noise3
-        data.B += np.sqrt(self.noise_level)*noise3
+        data.A += np.sqrt(np.float32(self.noise_level))*noise3
+        data.B += np.sqrt(np.float32(self.noise_level))*noise3
 
         return data
 
