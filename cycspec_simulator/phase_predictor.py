@@ -44,7 +44,7 @@ class FreqOnlyPredictor(PhasePredictor):
 
         Parameters
         ----------
-        t: Time at which the phase is to be evaluated.
+        t: Time at which the phase is to be evaluated (possibly an array).
         """
         return self.f0*(t - self.epoch)
 
@@ -55,11 +55,12 @@ class PolynomialPredictor(PhasePredictor):
     """
     def __init__(self, segments):
         """
-        Create a polynomial phase predictor from one or more segments.
+        Create a phase predictor based on multiple segments, each described by
+        a Taylor polynomial.
 
         Parameters
         ----------
-        segments: A list of PolynomialSegment objects representing the phase model.
+        segments: List of `PolynomialSegment` objects representing the segments.
         """
         self.segments = segments
         self.epoch = segments[0].epoch
@@ -67,11 +68,12 @@ class PolynomialPredictor(PhasePredictor):
     @classmethod
     def parse(cls, lines):
         """
-        Create a polynomial phase predictor by parsing lines from a polyco file.
+        Parse lines from a TEMPO `polyco.dat` file, potentially containing
+        multiple segments.
 
         Parameters
         ----------
-        lines: A list of lines to parse.
+        lines: List of lines from the file.
         """
         i = 0
         segments = []
@@ -105,11 +107,11 @@ class PolynomialPredictor(PhasePredictor):
     @classmethod
     def from_file(cls, filename):
         """
-        Create a polynomial phase predictor from a polyco file.
+        Create a phase predictor based on a TEMPO `polyco.dat` file.
 
         Parameters
         ----------
-        filename: Path to polyco file to read data from.
+        filename: Path to the polyco file.
         """
         with open(filename, 'r') as f:
             lines = f.readlines()
@@ -118,6 +120,7 @@ class PolynomialPredictor(PhasePredictor):
     def closest_segment(self, t):
         """
         Find the segment whose center is closest to the time `t`.
+        Broadcasts over arrays.
         """
         diffs = np.array([t - segment.epoch for segment in self.segments])
         closest_segment = np.argmin(np.abs(diffs), axis=0)
@@ -126,11 +129,11 @@ class PolynomialPredictor(PhasePredictor):
     def covers(self, t):
         """
         Return a boolean value (or array) indicating whether this phase predictor
-        includes a segment covering the time `t`.
+        includes a segment covering the time `t`. Broadcasts over arrays.
         """
         return np.any([segment.covers(t) for segment in self.segments], axis=0)
 
-    def phase(self, t, check_bounds=True):
+    def phase(self, t, check_bounds=True, reduce_refphase=True):
         """
         Return the phase of the pulsar at time `t`, as predicted by the
         segment whose center is closest to `t`.
@@ -138,14 +141,18 @@ class PolynomialPredictor(PhasePredictor):
         Parameters
         ----------
         t: Time at which the phase is to be evaluated.
-        check_bounds: If True, raise an exception if any of the times
-            represented by `t` are outside the bounds of all segments.
+        check_bounds: Whether to raise an error if any times are out of bounds,
+                      or just extrapolate based on the closest segment.
+        reduce_refphase: Whether to reduce the reference phase modulo 1 before
+                         computing the phase. This will bring the phase closer to
+                         zero by a whole number of turns, increasing the precision
+                         that can be retained in the fractional part.
         """
         closest_segment = self.closest_segment(t)
         phase = np.empty_like(t.offset)
         for i, segment in enumerate(self.segments):
             sl = (closest_segment == i)
-            phase[sl] = segment.phase(t[sl], check_bounds)
+            phase[sl] = segment.phase(t[sl], check_bounds, reduce_refphase)
 
         return phase[()] # turns 0d arrays into scalars, otherwise harmless
 
@@ -157,7 +164,25 @@ class PolynomialSegment:
     def __init__(self, span, site, epoch, ref_freq, ref_phase, ref_f0, coeffs,
                  start_phase=0., date_produced='', version='', log10_fit_err=0.):
         """
-        Create a PolynomialSegment object.
+        Create a phase predictor based on a single segment in which the phase
+        can be described by a Taylor polynomial as a function of time.
+
+        Parameters
+        ----------
+        span: Time span of the segment (minutes)
+        site: Observatory code indicating the location where the function is valid
+        epoch: Time at which the phase is zero
+        ref_freq: Reference radio frequency at which the phase is evaluated
+        ref_f0: Reference pulse frequency at the epoch
+        coeffs: Coefficients of powers of (t-epoch) in the Taylor polynomial.
+                `coeffs[k]` the coefficient of (t-epoch)**k.
+        start_phase: Phase at the epoch
+
+        Additional metadata (stored but not used)
+        -----------------------------------------
+        date_produced: Date when the approximate phase function was produced
+        version: Version of Tempo used to produce the approximation
+        log10_fit_err: Base-10 logarithm of the approximation error
         """
         self.date_produced = date_produced
         self.version = version
@@ -174,7 +199,8 @@ class PolynomialSegment:
     @classmethod
     def from_record(cls, rec):
         """
-        Create a PolynomialSegment object from a FITS record.
+        Create a `PolynomialSegment` from a record in a FITS HDU, such as might
+        be found in the 'POLYCO' HDU of a PSRFITS file.
         """
         return cls(
             span = rec['NSPAN'],
@@ -190,18 +216,23 @@ class PolynomialSegment:
             log10_fit_err = rec['LGFITERR'],
         )
 
-    def phase(self, t, check_bounds=True):
+    def phase(self, t, check_bounds=True, reduce_refphase=True):
         """
-        Return the phase of the pulsar at time `t`.
+        Calculate the phase at a particular time.
 
         Parameters
         ----------
         t: Time at which the phase is to be evaluated.
-        check_bounds: If True, raise an exception if any of the times
-            represented by `t` are outside the bounds of this segment.
+        check_bounds: Whether to raise an error if any times are out of bounds,
+                      or extrapolate beyond the bounds of the segment.
+        reduce_refphase: Whether to reduce the reference phase modulo 1 before
+                         computing the phase. This will bring the phase closer to
+                         zero by a whole number of turns, increasing the precision
+                         that can be retained in the fractional part.
         """
         dt = self.dt(t, check_bounds)
-        phase = (self.ref_phase % 1) + dt*60*self.ref_f0 + polynomial.polyval(dt, self.coeffs)
+        ref_phase = (self.ref_phase % 1) if reduce_refphase else self.ref_phase
+        phase = ref_phase + dt*60*self.ref_f0 + polynomial.polyval(dt, self.coeffs)
         return phase
 
     def dphase(self, t, check_bounds=True, ref_time=None):
@@ -245,18 +276,20 @@ class PolynomialSegment:
     def covers(self, t):
         """
         Return a boolean value (or array) indicating whether this segment
-        covers the time `t`.
+        covers the time `t`. Broadcasts over arrays.
         """
         dt = (t - self.epoch)/60 # minutes
         return np.abs(dt) <= self.span/2
 
     def dt(self, t, check_bounds=True):
         """
-        Return the time difference, in minutes, between `t` and the model epoch.
+        Calculate the time difference, in minutes, between `t` and the model epoch,
+        or raise an error if `t` is outside the bounds of this segment.
 
         Parameters
         ----------
-        t: Time for which to calculate the difference.
+        t: Specified time (possibly an array).
+        check_bounds: Whether to raise an error if any times are out of bounds.
         """
         dt = (t - self.epoch)/60 # minutes
         if check_bounds:

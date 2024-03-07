@@ -36,7 +36,9 @@ class Time:
             raise ValueError(f"Second {second} is beyond end of day {mjd}")
         self.mjd = mjd
         self.second = second
-        self.offset = np.asanyarray(offset)
+        if not hasattr(offset, 'shape'):
+            offset = np.asanyarray(offset)
+        self.offset = offset
 
     def __getitem__(self, sl):
         return Time(self.mjd, self.second, self.offset[sl])
