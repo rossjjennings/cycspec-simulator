@@ -91,7 +91,54 @@ def read_headers(filename):
             yield header
             fh.seek(header['BLOCSIZE'], os.SEEK_CUR)
 
-def read_raw(filename, use_dask=True):
+class GuppiRaw:
+    def __init__(self, headers, data):
+        self.headers = headers
+        self.data = data
+
+    @property
+    def header(self):
+        return self.headers[0]
+
+    @property
+    def n_blocks(self):
+        return len(self.headers)
+
+    @property
+    def nchan(self):
+        return int(self.header['OBSNCHAN'])
+
+    @property
+    def overlap(self):
+        return int(self.header['OVERLAP'])
+
+    @property
+    def packets_per_block(self):
+        return self.headers[1]['PKTIDX'] - self.headers[0]['PKTIDX']
+
+    @property
+    def bytes_per_packet(self):
+        nbytes = self.bytes_per_block(include_overlap=False)
+        return nbytes//self.packets_per_block
+
+    @property
+    def bytes_per_sample(self):
+        nbits = int(self.header['NBITS'])
+        dtype = np.dtype(f"int{nbits}")
+        # (2 real / complex) * (2 pols) * (# of channels) * itemsize
+        return 2*2*self.nchan*dtype.itemsize
+
+    def bytes_per_block(self, include_overlap=True):
+        nbytes_overlap = self.overlap*self.bytes_per_sample
+        nbytes = self.header['BLOCSIZE']
+        return nbytes if include_overlap else nbytes - nbytes_overlap
+
+    def samples_per_block(self, include_overlap=False):
+        # block size in bytes = (# of samples) * (# of bytes/sample)
+        nsamp_block = self.bytes_per_block()//self.bytes_per_sample
+        return nsamp_block if include_overlap else nsamp_block - self.overlap
+
+def read_raw(filename, use_dask=True, include_overlap='first'):
     headers = []
     chunks = []
     which_chunk = 0
@@ -123,7 +170,7 @@ def read_raw(filename, use_dask=True):
                 fh.seek(blocsize, os.SEEK_CUR)
             else:
                 chunk = np.frombuffer(fh.read(blocsize), dtype=dtype).reshape(shape)
-            if which_chunk > 0:
+            if (include_overlap == 'first' and which_chunk > 0) or not include_overlap:
                 chunk = chunk[:,int(header['OVERLAP']):]
             chunks.append(chunk)
             which_chunk += 1
@@ -131,10 +178,10 @@ def read_raw(filename, use_dask=True):
         data = da.concatenate(chunks, axis=1)
     else:
         data = np.concatenate(chunks, axis=1)
-    return headers, data
+    return GuppiRaw(headers, data)
 
-def read(filename, use_dask=True):
-    headers, data = read_raw(filename, use_dask=use_dask)
+def read(filename, use_dask=True, include_overlap='first'):
+    headers, data = read_raw(filename, use_dask=use_dask, include_overlap=include_overlap)
     complex_data = data[..., 0] + np.complex64(1j)*data[..., 1]
     A = complex_data[..., 0]
     B = complex_data[..., 0]
