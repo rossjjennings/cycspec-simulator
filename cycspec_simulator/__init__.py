@@ -11,6 +11,7 @@ from .filterbank import channelize
 from .cuda import have_cuda
 if have_cuda:
     from .cycspec_gpu import cycfold_gpu
+from . import guppi_raw
 
 from . import _version
 __version__ = _version.get_versions()['version']
