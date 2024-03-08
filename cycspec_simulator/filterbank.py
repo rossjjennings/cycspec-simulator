@@ -1,8 +1,13 @@
 import numpy as np
+import numba as nb
 from scipy import signal
 
 from .baseband import BasebandData
 from .interpolation import lerp
+from .cycspec import PeriodicSpectrum, cycfold_cpu
+from .cuda import have_cuda, cuda_failure
+if have_cuda:
+    from .cycspec_gpu import cycfold_gpu
 
 def pfb(x, nchan, ntap, window="hamming", fs=1.0):
     """
@@ -144,3 +149,58 @@ class ChannelizedData:
 
     def __getitem__(self, ichan):
         return self.extract_channel(ichan)
+
+    def cycfold(self, ncyc, nbin, predictor, use_cuda=have_cuda,
+                   n_threads=nb.config.NUMBA_NUM_THREADS):
+        """
+        Compute the periodic spectrum from channelized data.
+
+        Parameters
+        ----------
+        ncyc: Number of cyclic channels per filterbank channel
+        nbin: Number of phase bins in which to accumulate
+        predictor: `PhasePredictor` object to use in computing phases.
+        use_cuda: Whether to use CUDA acceleration. Defaults to True if a CUDA
+                  device is detected by CuPy. Otherwise defaults to False.
+        n_threads: Number of CPU threads to use. Defaults to the total number of
+                   CPUs, as detected by Numba. Has no effect if use_gpu is True.
+        """
+        if use_cuda and have_cuda:
+            cycfold = cycfold_gpu
+            cycfold_kwargs = {}
+        elif use_cuda:
+            err = ValueError("use_cuda was specified, but no CUDA device was found")
+            raise err from cuda_failure
+        else:
+            cycfold = cycfold_cpu
+            cycfold_kwargs = {'n_threads': n_threads}
+
+        freq = np.zeros(ncyc*self.nchan)
+        I = np.zeros((ncyc*self.nchan, nbin))
+        Q = np.zeros((ncyc*self.nchan, nbin))
+        U = np.zeros((ncyc*self.nchan, nbin))
+        V = np.zeros((ncyc*self.nchan, nbin))
+        chan_data = self.extract_channel(0)
+        pspec = cycfold(chan_data, ncyc, nbin, predictor, **cycfold_kwargs)
+        bot = slice(0, ncyc - ncyc//2)
+        top = slice(-ncyc//2, None)
+        freq[top] = pspec.freq[:ncyc//2] + self.bandwidth
+        freq[bot] = pspec.freq[ncyc//2:]
+        I[top] = pspec.I[:ncyc//2]
+        I[bot] = pspec.I[ncyc//2:]
+        Q[top] = pspec.Q[:ncyc//2]
+        Q[bot] = pspec.Q[ncyc//2:]
+        U[top] = pspec.U[:ncyc//2]
+        U[bot] = pspec.U[ncyc//2:]
+        V[top] = pspec.V[:ncyc//2]
+        V[bot] = pspec.V[ncyc//2:]
+        for ichan in range(1, self.nchan):
+            chan_data = self.extract_channel(ichan)
+            pspec = cycfold(chan_data, ncyc, nbin, predictor, **cycfold_kwargs)
+            sl = slice((ichan-1)*ncyc + ncyc//2, ichan*ncyc + ncyc//2)
+            freq[sl] = pspec.freq
+            I[sl] = pspec.I
+            Q[sl] = pspec.Q
+            U[sl] = pspec.U
+            V[sl] = pspec.V
+        return PeriodicSpectrum(freq, self.start_time, I, Q, U, V)

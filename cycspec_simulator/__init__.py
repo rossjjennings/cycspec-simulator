@@ -8,12 +8,7 @@ from .folding import fold
 from .time import Time
 from .metadata import ObservingMetadata
 from .filterbank import channelize
-
-try:
-    import cupy
-    have_cuda = True
-except ImportError:
-    have_cuda = False
+from .cuda import have_cuda
 if have_cuda:
     from .cycspec_gpu import cycfold_gpu
 

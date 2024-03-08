@@ -4,6 +4,10 @@ import dask.array as da
 
 from .interpolation import fft_interp, lerp
 from .time import Time
+from .cycspec import PeriodicSpectrum, cycfold_cpu
+from .cuda import have_cuda, cuda_failure
+if have_cuda:
+    from .cycspec_gpu import cycfold_gpu
 
 def complex_white_noise(shape, rng, dtype):
     real = rng.standard_normal(size=shape, dtype=dtype)
@@ -171,3 +175,26 @@ class BasebandData:
             )
         else:
             return self
+
+    def cycfold(self, nchan, nbin, predictor, use_cuda=have_cuda,
+                n_threads=nb.config.NUMBA_NUM_THREADS):
+        """
+        Compute the periodic spectrum from baseband data.
+
+        Parameters
+        ----------
+        nchan: Number of channels in the periodic spectrum to compute
+        nbin: Number of phase bins in which to accumulate
+        predictor: `PhasePredictor` object to use in computing phases.
+        use_cuda: Whether to use CUDA acceleration. Defaults to True if a CUDA
+                  device is detected by CuPy. Otherwise defaults to False.
+        n_threads: Number of CPU threads to use. Defaults to the total number of
+                   CPUs, as detected by Numba. Has no effect if use_gpu is True.
+        """
+        if use_cuda and have_cuda:
+            return cycfold_gpu(self, nchan, nbin, predictor)
+        elif use_cuda:
+            err = ValueError("use_cuda was specified, but no CUDA device was found")
+            raise err from cuda_failure
+        else:
+            return cycfold_cpu(self, nchan, nbin, predictor, n_threads=n_threads)
