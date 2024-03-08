@@ -9,12 +9,13 @@ from .plot_helpers import symmetrize_limits
 from .time import Time
 
 class PeriodicSpectrum:
-    def __init__(self, freq, feed_poln, start_time, I, Q=None, U=None, V=None):
+    def __init__(self, freq, start_time, I, Q=None, U=None, V=None):
         """
         Create a new peiodic spectrum from frequency, I, Q, U, and V arrays.
         If one of Q, U, or V is present, all must be present with the same shape.
         """
         self.freq = freq
+        self.start_time = start_time
 
         self.full_stokes, self.shape = validate_stokes(I, Q, U, V)
         self.I = I
@@ -215,5 +216,5 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
         pspec_CI,
         data.feed_poln,
     )
-    pspec = PeriodicSpectrum(freq, data.feed_poln, data.start_time, I, Q, U, V)
+    pspec = PeriodicSpectrum(freq, data.start_time, I, Q, U, V)
     return pspec

@@ -7,6 +7,7 @@ from .cycspec import cycfold_cpu
 from .folding import fold
 from .time import Time
 from .metadata import ObservingMetadata
+from .filterbank import channelize
 
 try:
     import cupy
@@ -14,7 +15,7 @@ try:
 except ImportError:
     have_cuda = False
 if have_cuda:
-    from .cycspec_gpu import cycfold_gpu, cycfold_gpu_sharedmem
+    from .cycspec_gpu import cycfold_gpu
 
 from . import _version
 __version__ = _version.get_versions()['version']

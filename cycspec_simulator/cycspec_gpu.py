@@ -29,22 +29,42 @@ class CUDATimer:
         self.event_end.synchronize()
         self.elapsed = self.event_begin.elapsed_time(self.event_end)
 
-@cuda.jit((
-    nb.complex64[:],
-    nb.complex64[:],
-    nb.int64,
-    nb.int64[:],
-    nb.int32[:],
-    nb.float32[:],
-    nb.float32[:],
-    nb.float32[:],
-    nb.float32[:],
-    nb.float32[:],
-    nb.float32[:],
-    nb.float32[:],
-    nb.float32[:],
-    nb.boolean,
-))
+signatures = [
+    (
+        nb.complex64[::1],
+        nb.complex64[::1],
+        nb.int64,
+        nb.int64[::1],
+        nb.int32[::1],
+        nb.float32[::1],
+        nb.float32[::1],
+        nb.float32[::1],
+        nb.float32[::1],
+        nb.float32[::1],
+        nb.float32[::1],
+        nb.float32[::1],
+        nb.float32[::1],
+        nb.boolean,
+    ),
+    (
+        nb.complex128[::1],
+        nb.complex128[::1],
+        nb.int64,
+        nb.int64[::1],
+        nb.int32[::1],
+        nb.float64[::1],
+        nb.float64[::1],
+        nb.float64[::1],
+        nb.float64[::1],
+        nb.float64[::1],
+        nb.float64[::1],
+        nb.float64[::1],
+        nb.float64[::1],
+        nb.boolean,
+    ),
+]
+
+@cuda.jit(signatures)
 def corrfold_gpu(A, B, nbin, binplan, n_samples,
                  AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag,
                  include_end=False):
@@ -108,7 +128,9 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False):
           corresponding array of phases.
     include_end: Passed along to corrfold_gpu(), see there for details.
     """
-    print(f"Input dtype : {data.A.dtype}")
+    complex_dtype = data.A.dtype
+    real_dtype = data.A.real.dtype
+    print(f"Input dtype: {complex_dtype}")
     nlag = ncyc//2 + 1
     A_gpu = cupy.array(data.A)
     B_gpu = cupy.array(data.B)
@@ -123,14 +145,14 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False):
     binplan = cupy.array(binplan)
 
     n_samples = cupy.zeros(nlag*nbin, dtype=np.int32)
-    AA_real = cupy.zeros(nlag*nbin, dtype=np.float32)
-    AA_imag = cupy.zeros(nlag*nbin, dtype=np.float32)
-    AB_real = cupy.zeros(nlag*nbin, dtype=np.float32)
-    AB_imag = cupy.zeros(nlag*nbin, dtype=np.float32)
-    BA_real = cupy.zeros(nlag*nbin, dtype=np.float32)
-    BA_imag = cupy.zeros(nlag*nbin, dtype=np.float32)
-    BB_real = cupy.zeros(nlag*nbin, dtype=np.float32)
-    BB_imag = cupy.zeros(nlag*nbin, dtype=np.float32)
+    AA_real = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    AA_imag = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    AB_real = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    AB_imag = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    BA_real = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    BA_imag = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    BB_real = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    BB_imag = cupy.zeros(nlag*nbin, dtype=real_dtype)
     stream = cuda.stream()
     with CUDATimer(stream) as cudatimer:
         cuda.profile_start()
@@ -144,14 +166,15 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False):
     print(f"Total products accumulated: {4*np.sum(n_samples)}")
     throughput = 4*np.sum(n_samples)/(cudatimer.elapsed/1000)
     print(f"Throughput: {throughput:g} products/sec.")
+    i = cupy.array(1j, dtype=complex_dtype)
 
-    AA = (AA_real + 1j*AA_imag)/n_samples
+    AA = (AA_real + i*AA_imag)/n_samples
     AA = AA.reshape(nlag, nbin)
-    BB = (BB_real + 1j*BB_imag)/n_samples
+    BB = (BB_real + i*BB_imag)/n_samples
     BB = BB.reshape(nlag, nbin)
-    CR = (AB_real + BA_real + 1j*(AB_imag + BA_imag))/(2*n_samples)
+    CR = (AB_real + BA_real + i*(AB_imag + BA_imag))/(2*n_samples)
     CR = CR.reshape(nlag, nbin)
-    CI = (AB_real - BA_real + 1j*(AB_imag - BA_imag))/(2j*n_samples)
+    CI = (AB_real - BA_real + i*(AB_imag - BA_imag))/(2*i*n_samples)
     CI = CI.reshape(nlag, nbin)
     pspec_AA = np.fft.fftshift(np.fft.hfft(AA.get(), axis=0), axes=0)
     pspec_AA = pspec_AA.reshape(ncyc, nbin)
@@ -171,121 +194,6 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False):
         pspec_CI,
         data.feed_poln,
     )
-    pspec = PeriodicSpectrum(freq, data.feed_poln, data.start_time, I, Q, U, V)
+    pspec = PeriodicSpectrum(freq, data.start_time, I, Q, U, V)
     return pspec
 
-def cycfold_gpu_sharedmem(data, ncyc, nbin, phase_predictor):
-    nlag = ncyc//2 + 1
-    threads_per_block = 512
-    shared_binplan_size = 2*threads_per_block + nlag - 2
-    shared_samples_size = threads_per_block + nlag - 1
-
-    @cuda.jit((nb.complex64[:,:], nb.complex64[:,:], nb.int64, nb.int64[:], nb.int32[:],
-               nb.float32[:], nb.float32[:], nb.float32[:], nb.float32[:],
-               nb.float32[:], nb.float32[:], nb.float32[:], nb.float32[:]))
-    def _cycfold_gpu_sharedmem(A, B, nbin, binplan, n_samples,
-                               AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag):
-        iblock = cuda.blockIdx.x
-        nblocks = cuda.gridDim.x
-        ichan = cuda.blockIdx.y
-        ithread = cuda.threadIdx.x
-        nthreads = cuda.blockDim.x
-        igrid = iblock*nthreads + ithread
-
-        binplan_shared = cuda.shared.array((shared_binplan_size,), dtype=nb.int32)
-        binplan_shared[ithread] = binplan[2*iblock*nthreads + ithread]
-        binplan_shared[nthreads + ithread] = binplan[(2*iblock + 1)*nthreads + ithread]
-        if ithread < nlag - 2 and (2*iblock + 2)*nthreads + ithread < binplan.size:
-            binplan_shared[2*nthreads + ithread] = binplan[(2*iblock + 2)*nthreads + ithread]
-
-        A_shared = cuda.shared.array((shared_samples_size,), dtype=nb.complex64)
-        B_shared = cuda.shared.array((shared_samples_size,), dtype=nb.complex64)
-        A_shared[ithread] = A[ichan, igrid]
-        B_shared[ithread] = B[ichan, igrid]
-        if ithread < nlag - 1 and igrid + nthreads < A.shape[1]:
-            A_shared[ithread + nthreads] = A[ichan, igrid + nthreads]
-            B_shared[ithread + nthreads] = B[ichan, igrid + nthreads]
-        cuda.syncthreads()
-
-        for ilag in range(nlag):
-            ibin = binplan_shared[2*ithread + ilag]
-            ibuf = ichan*nlag*nbin + ilag*nbin + ibin
-            if igrid + ilag < A.shape[1]:
-                cuda.atomic.add(n_samples, ibuf, 1)
-                product_AA = (A_shared[ithread + ilag] * A_shared[ithread].conjugate())
-                cuda.atomic.add(AA_real, ibuf, product_AA.real)
-                cuda.atomic.add(AA_imag, ibuf, product_AA.imag)
-                product_AB = (A_shared[ithread + ilag] * B_shared[ithread].conjugate())
-                cuda.atomic.add(AB_real, ibuf, product_AB.real)
-                cuda.atomic.add(AB_imag, ibuf, product_AB.imag)
-                product_BA = (B_shared[ithread + ilag] * A_shared[ithread].conjugate())
-                cuda.atomic.add(BA_real, ibuf, product_BA.real)
-                cuda.atomic.add(BA_imag, ibuf, product_BA.imag)
-                product_BB = (B_shared[ithread + ilag] * B_shared[ithread].conjugate())
-                cuda.atomic.add(BB_real, ibuf, product_BB.real)
-                cuda.atomic.add(BB_imag, ibuf, product_BB.imag)
-
-    A_gpu = cupy.array(data.A)
-    B_gpu = cupy.array(data.B)
-
-    # construct the bin plan
-    offset = np.empty(2*data.t.offset.size - 1)
-    offset[::2] = data.t.offset
-    offset[1::2] = (data.t.offset[1:] + data.t.offset[:-1])/2
-    t = Time(data.t.mjd, data.t.second, offset)
-    phase = phase_predictor.phase(t)
-    binplan = np.int64(np.round((phase % 1)*nbin)) % nbin
-    binplan = cupy.array(binplan)
-
-    nblocks = int(np.ceil(data.A.shape[1]/threads_per_block))
-    n_samples = cupy.zeros(data.nchan*nlag*nbin, dtype=np.int32)
-    AA_real = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    AA_imag = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    AB_real = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    AB_imag = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    BA_real = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    BA_imag = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    BB_real = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    BB_imag = cupy.zeros(data.nchan*nlag*nbin, dtype=np.float32)
-    stream = cuda.stream()
-    with CUDATimer(stream) as cudatimer:
-        cuda.profile_start()
-        _cycfold_gpu_sharedmem[(nblocks, data.nchan), threads_per_block, stream](
-            A_gpu, B_gpu, nbin, binplan, n_samples,
-            AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag
-        )
-        cuda.profile_stop()
-    print(f"Elapsed time: {cudatimer.elapsed:g} ms")
-    print(f"Total products accumulated: {4*np.sum(n_samples)}")
-    throughput = 4*np.sum(n_samples)/(cudatimer.elapsed/1000)
-    print(f"Throughput: {throughput:g} products/sec.")
-
-    AA = (AA_real + 1j*AA_imag)/n_samples
-    AA = AA.reshape(data.nchan, nlag, nbin)
-    BB = (BB_real + 1j*BB_imag)/n_samples
-    BB = BB.reshape(data.nchan, nlag, nbin)
-    CR = (AB_real + BA_real + 1j*(AB_imag + BA_imag))/(2*n_samples)
-    CR = CR.reshape(data.nchan, nlag, nbin)
-    CI = (AB_real - BA_real + 1j*(AB_imag - BA_imag))/(2j*n_samples)
-    CI = CI.reshape(data.nchan, nlag, nbin)
-    pspec_AA = np.fft.fftshift(np.fft.hfft(AA.get(), axis=1), axes=1)
-    pspec_AA = pspec_AA.reshape(data.nchan*ncyc, nbin)
-    pspec_BB = np.fft.fftshift(np.fft.hfft(BB.get(), axis=1), axes=1)
-    pspec_BB = pspec_BB.reshape(data.nchan*ncyc, nbin)
-    pspec_CR = np.fft.fftshift(np.fft.hfft(CR.get(), axis=1), axes=1)
-    pspec_CR = pspec_CR.reshape(data.nchan*ncyc, nbin)
-    pspec_CI = np.fft.fftshift(np.fft.hfft(CI.get(), axis=1), axes=1)
-    pspec_CI = pspec_CI.reshape(data.nchan*ncyc, nbin)
-    bandwidth = data.nchan*data.chan_bw
-    nfreq = data.nchan*ncyc
-    freq = data.obsfreq + np.linspace(-bandwidth/2, bandwidth/2, nfreq, endpoint=False)
-
-    I, Q, U, V = coherence_to_stokes(
-        pspec_AA,
-        pspec_BB,
-        pspec_CR,
-        pspec_CI,
-        data.feed_poln,
-    )
-    pspec = PeriodicSpectrum(freq, data.feed_poln, data.start_time, I, Q, U, V)
-    return pspec

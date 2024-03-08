@@ -128,6 +128,14 @@ class ChannelizedData:
         self.chan_bw = chan_bw
         self.freqs = freqs
 
+    @property
+    def nchan(self):
+        return self.A.shape[0]
+
+    @property
+    def bandwidth(self):
+        return self.nchan*self.chan_bw
+
     def extract_channel(self, ichan):
         return BasebandData(
             self.A[ichan], self.B[ichan], start_time=self.start_time,
