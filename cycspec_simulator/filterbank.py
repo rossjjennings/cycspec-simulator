@@ -138,8 +138,18 @@ class ChannelizedData:
         return self.A.shape[0]
 
     @property
+    def n_samples(self):
+        return self.A.shape[-1]
+
+    @property
     def bandwidth(self):
         return self.nchan*self.chan_bw
+
+    @property
+    def tspan(self):
+        n_samples = self.A.shape[-1]
+        sample_freq = np.abs(self.chan_bw)
+        return n_samples/sample_freq
 
     def extract_channel(self, ichan):
         return BasebandData(

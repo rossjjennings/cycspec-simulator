@@ -152,7 +152,6 @@ class BasebandData:
             raise ValueError(f"A and B should be the same shape! Found: {A.shape} != {B.shape}")
         self.A = A
         self.B = B
-        self.n_samples = self.A.shape[-1]
         self.delayed = isinstance(A, da.Array)
         self.start_time = start_time
         self.feed_poln = feed_poln.upper()
@@ -160,9 +159,19 @@ class BasebandData:
         self.obsfreq = obsfreq
 
     @property
+    def n_samples(self):
+        return self.A.shape[-1]
+
+    @property
     def t(self):
         sample_freq = np.abs(self.bandwidth)
         return get_time_axis(self.start_time, self.n_samples, sample_freq, self.delayed)
+
+    @property
+    def tspan(self):
+        n_samples = self.A.shape[-1]
+        sample_freq = np.abs(self.bandwidth)
+        return n_samples/sample_freq
 
     def compute_all(self):
         if self.delayed:
