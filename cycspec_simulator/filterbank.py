@@ -38,10 +38,10 @@ def pfb(x, nchan, ntap, window="hamming", fs=1.0):
     """
     h = signal.firwin(ntap*nchan,cutoff=1.0/nchan, window="rectangular")
     h *= signal.get_window(window, ntap*nchan)
-    nwin = x.shape[0]//ntap//nchan
-    x = x[:nwin*ntap*nchan].reshape((nwin*ntap, nchan))
+    ns_chan = x.shape[0]//nchan
+    x = x[:ns_chan*nchan].reshape((ns_chan, nchan))
     h = h.reshape((ntap, nchan))
-    xs = np.zeros((ntap*(nwin-1)+1, nchan), dtype=x.dtype)
+    xs = np.zeros((ns_chan-ntap+1, nchan), dtype=x.dtype)
     for ichan in range(nchan):
         xs[:,ichan] = signal.correlate(x[:,ichan], h[:,ichan], mode="valid")
     xpfb = np.fft.fft(xs, nchan, axis=1)
@@ -49,7 +49,7 @@ def pfb(x, nchan, ntap, window="hamming", fs=1.0):
 
     return xpfb
 
-def channelize(data, nchan, ntap=24, window='hamming'):
+def channelize(data, nchan, ntap=24, window="hamming"):
     """
     Channelize a BasebandData object using a polyphase filterbank.
 
