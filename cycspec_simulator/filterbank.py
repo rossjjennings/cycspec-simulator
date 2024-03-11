@@ -39,13 +39,11 @@ def pfb(x, nchan, ntap, window="hamming", fs=1.0):
     h = signal.firwin(ntap*nchan,cutoff=1.0/nchan, window="rectangular")
     h *= signal.get_window(window, ntap*nchan)
     nwin = x.shape[0]//ntap//nchan
-    x = x[:nwin*ntap*nchan].reshape((nwin*ntap, nchan)).T
-    h = h.reshape((ntap, nchan)).T
-    xs = np.zeros((nchan, ntap*(nwin-1)+1), dtype=x.dtype)
-    for ii in range(ntap*(nwin-1)+1):
-        xw = h*x[:, ii:ii+ntap]
-        xs[:, ii] = xw.sum(axis=1)
-    xs = xs.T
+    x = x[:nwin*ntap*nchan].reshape((nwin*ntap, nchan))
+    h = h.reshape((ntap, nchan))
+    xs = np.zeros((ntap*(nwin-1)+1, nchan), dtype=x.dtype)
+    for ichan in range(nchan):
+        xs[:,ichan] = signal.correlate(x[:,ichan], h[:,ichan], mode="valid")
     xpfb = np.fft.fft(xs, nchan, axis=1)
     xpfb *= np.sqrt(nchan)
 
