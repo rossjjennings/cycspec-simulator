@@ -1,6 +1,7 @@
 import numpy as np
 import numba as nb
 import dask.array as da
+from abc import ABCMeta, abstractmethod
 
 from .interpolation import fft_interp, lerp
 from .time import Time
@@ -9,20 +10,47 @@ from .cuda import have_cuda, cuda_failure
 if have_cuda:
     from .cycspec_gpu import cycfold_gpu
 
-def complex_white_noise(shape, rng, dtype):
-    real = rng.standard_normal(size=shape, dtype=dtype)
-    imag = rng.standard_normal(size=shape, dtype=dtype)
+class RandomNumberGenerator(metaclass=ABCMeta):
+    """
+    A random number generator similar to a `numpy.random.Generator`.
+    """
+    @abstractmethod
+    def standard_normal(self, size=None):
+        pass
+
+RandomNumberGenerator.register(np.random.Generator)
+
+class DelayedRNG(RandomNumberGenerator, metaclass=ABCMeta):
+    """
+    A random number generator similar to a `dask.array.random.Generator`.
+    Differs from the base RandomNumberGenerator class in that generation functions
+    should take a `chunks` argument.
+    """
+    @abstractmethod
+    def standard_normal(self, size=None, chunks=None):
+        pass
+
+if hasattr(da.random, 'Generator'):
+    DelayedRNG.register(da.random.Generator)
+
+def complex_white_noise(shape, rng, dtype, chunks=-1):
+    kwargs = {'size': shape, 'dtype': dtype}
+    if isinstance(rng, DelayedRNG):
+        kwargs['chunks'] = chunks
+
+    real = rng.standard_normal(**kwargs)
+    imag = rng.standard_normal(**kwargs)
     return (real + 1j*imag)/np.sqrt(2)
 
 class BasebandModel:
     def __init__(self, template, predictor, bandwidth, filters=None,
-                 obsfreq=0, noise_level=0, feed_poln='LIN', rng=None):
+                 obsfreq=0, noise_level=0, feed_poln='LIN'):
         """
         Create a new model for generating simulated baseband data.
 
         Parameters
         ----------
-        template: TemplateProfile object representing the pulse profile.
+        template: `TemplateProfile` object representing the pulse profile.
         predictor: Pulse phase predictor.
         bandwidth: Bandwidth of simulated data (same units as `pulse_freq`).
         nchan: Number of channels in simulated data.
@@ -30,9 +58,6 @@ class BasebandModel:
                  units as `bandwidth`).
         noise_level: Noise variance in intensity units.
         feed_poln: Feed polarization ('LIN' for linear or 'CIRC' for circular).
-        rng: Random number generator. Expected to be a `np.random.Generator`.
-             If `None`, an instance of `np.random.default_rng()` will be created.
-             Only the `normal()` method will ever be called.
         """
         self.template = template
         self.predictor = predictor
@@ -43,10 +68,6 @@ class BasebandModel:
         self.obsfreq = obsfreq
         self.noise_level = noise_level
         self.feed_poln = feed_poln.upper()
-        if rng is None:
-            self.rng = np.random.default_rng()
-        else:
-            self.rng = rng
 
     def add_filter(self, filtr):
         """
@@ -58,7 +79,8 @@ class BasebandModel:
         """
         self.filters.append(filtr)
 
-    def sample(self, n_samples, t_start=None, interp=lerp, dtype=np.float32):
+    def sample(self, n_samples, t_start=None, interp=lerp, dtype=np.float32,
+               rng=None, chunks=2**23):
         """
         Simulate a given number of samples from the modeled baseband time series.
 
@@ -72,21 +94,27 @@ class BasebandModel:
                 evaluate the interpolated function (extended periodically).
                 `fft_interp` and `lerp` (the default) both work.
         dtype: Numpy dtype to use for samples.
+        rng: `RandomNumberGenerator` object used to generate white noise that
+             is filtered to create the baseband data. If `None`, an instance of
+             `np.random.default_rng()` will be created.
+        chunks: Size of chunks to use. Has no effect unless using a `DelayedRNG`.
         """
         if t_start is None:
             t_start = self.predictor.epoch
         dtype = np.dtype(dtype)
+        if rng is None:
+            rng = np.random.default_rng()
 
         for filtr in self.filters:
             n_samples += filtr.n_samples - 1
 
-        delayed = hasattr(da.random, 'Generator') and isinstance(self.rng, da.random.Generator)
+        delayed = isinstance(rng, DelayedRNG)
         t = get_time_axis(t_start, n_samples, self.bandwidth, delayed=delayed)
         phase = self.predictor.phase(t) - int(self.predictor.phase(t_start))
         binno = (phase*self.template.nbin).astype(dtype)
         I = interp(self.template.I, binno)
-        noise1 = complex_white_noise(n_samples, self.rng, dtype)
-        noise2 = complex_white_noise(n_samples, self.rng, dtype)
+        noise1 = complex_white_noise(n_samples, rng, dtype, chunks)
+        noise2 = complex_white_noise(n_samples, rng, dtype, chunks)
         if self.template.full_stokes:
             Q = interp(self.template.Q, binno)
             U = interp(self.template.U, binno)
@@ -111,8 +139,8 @@ class BasebandModel:
         for filtr in self.filters:
             data = filtr.apply(data)
 
-        noise3 = complex_white_noise(data.n_samples, self.rng, dtype)
-        noise4 = complex_white_noise(data.n_samples, self.rng, dtype)
+        noise3 = complex_white_noise(data.n_samples, rng, dtype, chunks)
+        noise4 = complex_white_noise(data.n_samples, rng, dtype, chunks)
         data.A += np.sqrt(np.float32(self.noise_level)/2)*noise3
         data.B += np.sqrt(np.float32(self.noise_level)/2)*noise4
 
