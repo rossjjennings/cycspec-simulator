@@ -138,7 +138,17 @@ class GuppiRaw:
         nsamp_block = self.bytes_per_block()//self.bytes_per_sample
         return nsamp_block if include_overlap else nsamp_block - self.overlap
 
-def read_raw(filename, use_dask=True, include_overlap='first'):
+def read_raw(filename, use_dask=True, include_overlap=True):
+    """
+    Read data from a GUPPI Raw file into a GuppiRaw object.
+
+    Parameters
+    ----------
+    filename: Name of file to read from
+    use_dask: If `True`, create a memory-mapped array using Dask.
+              If `False`, create an in-memory Numpy array.
+    include_overlap: Whether to include the overlap region at the end of each block
+    """
     headers = []
     chunks = []
     which_chunk = 0
@@ -170,8 +180,8 @@ def read_raw(filename, use_dask=True, include_overlap='first'):
                 fh.seek(blocsize, os.SEEK_CUR)
             else:
                 chunk = np.frombuffer(fh.read(blocsize), dtype=dtype).reshape(shape)
-            if (include_overlap == 'first' and which_chunk > 0) or not include_overlap:
-                chunk = chunk[:,int(header['OVERLAP']):]
+            if not include_overlap:
+                chunk = chunk[:,:-int(header['OVERLAP'])]
             chunks.append(chunk)
             which_chunk += 1
     if use_dask:
@@ -180,15 +190,22 @@ def read_raw(filename, use_dask=True, include_overlap='first'):
         data = np.concatenate(chunks, axis=1)
     return GuppiRaw(headers, data)
 
-def read(filename, use_dask=True, include_overlap='first'):
-    headers, data = read_raw(filename, use_dask=use_dask, include_overlap=include_overlap)
+def read(filename):
+    raw = read_raw(filename, use_dask=True, include_overlap=True)
+    last_overlap = raw.data[:, -raw.overlap:]
+    trimmed_data = da.overlap.trim_overlap(raw.data, depth={1: (0, raw.overlap)})
+    data = da.concatenate([trimmed_data, last_overlap], axis=1)
     complex_data = data[..., 0] + np.complex64(1j)*data[..., 1]
     A = complex_data[..., 0]
-    B = complex_data[..., 0]
-    start_time = Time(headers[0]['STT_IMJD'], headers[0]['STT_SMJD'], headers[0]['STT_OFFS'])
-    feed_poln = headers[0]['FD_POLN']
-    chan_bw = float(headers[0]['OBSBW'])/int(headers[0]['OBSNCHAN'])*1e6
-    obsfreq = float(headers[0]['OBSFREQ'])*1e6
+    B = complex_data[..., 1]
+    start_time = Time(
+        raw.header['STT_IMJD'],
+        raw.header['STT_SMJD'],
+        raw.header['STT_OFFS'],
+    )
+    feed_poln = raw.header['FD_POLN']
+    chan_bw = float(raw.header['OBSBW'])/int(raw.header['OBSNCHAN'])*1e6
+    obsfreq = float(raw.header['OBSFREQ'])*1e6
     return BasebandData(A, B, start_time, feed_poln, chan_bw, obsfreq)
 
 def quantize(data, out_dtype=np.int8, autoscale=True):
@@ -203,8 +220,18 @@ def quantize(data, out_dtype=np.int8, autoscale=True):
 
 def write(filename, data, samples_per_block=None, pktsize=8192, overlap=0, out_dtype=np.int8, autoscale=True, metadata=None, **kwargs):
     """
-    Write data to a GUPPI raw file.
-    Currently limited to writing a single channel.
+    Write channelized data to a GUPPI raw file.
+
+    Parameters
+    ----------
+    filename: Name of file to write data to
+    data: `ChannelizedData` object
+    samples_per_block: Number of samples write in each block
+    pktsize: Number of bytes in a "packet". Usually not necessary to change.
+    overlap: Number of overlap samples.
+    out_dtype: Data type of output. Default is int8 (8 bits).
+    autoscale: Whether to automatically scale the data to fit in the range of
+              the output data type.
     """
     nbytes = np.dtype(out_dtype).itemsize
     nsamples = data.n_samples
