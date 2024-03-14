@@ -220,11 +220,14 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
             corr_BA.append(da.from_delayed(BA_blk, (nlag, nbin), dtype=data.A.dtype))
             corr_BB.append(da.from_delayed(BB_blk, (nlag, nbin), dtype=data.A.dtype))
             samples.append(da.from_delayed(samples_blk, (nlag, nbin), dtype=np.int64))
-        corr_AA = sum(corr_AA).compute()
-        corr_AB = sum(corr_AB).compute()
-        corr_BA = sum(corr_BA).compute()
-        corr_BB = sum(corr_BB).compute()
-        samples = sum(samples).compute()
+        corr_AA = da.mean(da.stack(corr_AA), axis=0)
+        corr_AB = da.mean(da.stack(corr_AB), axis=0)
+        corr_BA = da.mean(da.stack(corr_BA), axis=0)
+        corr_BB = da.mean(da.stack(corr_BB), axis=0)
+        samples = da.sum(da.stack(samples), axis=0)
+        corr_AA, corr_AB, corr_BA, corr_BB, samples = dask.compute(
+            corr_AA, corr_AB, corr_BA, corr_BB, samples
+        )
         print(f"Total products accumulated: {4*np.sum(samples)}")
     else:
         timer = CPUTimer()

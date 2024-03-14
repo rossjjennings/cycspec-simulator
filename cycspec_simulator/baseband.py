@@ -208,7 +208,7 @@ class BasebandData:
                 self.B.compute(),
                 self.start_time,
                 self.feed_poln,
-                self.chan_bw,
+                self.bandwidth,
                 self.obsfreq,
             )
         else:
