@@ -207,7 +207,10 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
 
     if data.delayed:
         corr_AA, corr_AB, corr_BA, corr_BB, samples = [], [], [], [], []
-        for A_blk, B_blk, plan_blk in zip(data.A.blocks, data.B.blocks, binplan.blocks):
+        A = da.overlap.overlap(data.A, depth={0: (0, nlag - 1)}, boundary=None)
+        B = da.overlap.overlap(data.B, depth={0: (0, nlag - 1)}, boundary=None)
+        binplan = da.overlap.overlap(binplan, depth={0: (0, 2*nlag - 2)}, boundary=None)
+        for A_blk, B_blk, plan_blk in zip(A.blocks, B.blocks, binplan.blocks):
             corrfold = dask.delayed(corrfold_cpu, nout=5)
             AA_blk, AB_blk, BA_blk, BB_blk, samples_blk = corrfold(
                 A_blk, B_blk, nlag, nbin, plan_blk, include_end
@@ -222,6 +225,7 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
         corr_BA = sum(corr_BA).compute()
         corr_BB = sum(corr_BB).compute()
         samples = sum(samples).compute()
+        print(f"Total products accumulated: {4*np.sum(samples)}")
     else:
         timer = CPUTimer()
         with timer, NumbaThreads(n_threads):
