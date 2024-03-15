@@ -1,5 +1,6 @@
 import numpy as np
 import numba as nb
+import dask.array as da
 from astropy.utils.iers import LeapSeconds
 
 # Get the list of leap seconds from Astropy.
@@ -52,6 +53,17 @@ class Time:
         second_diff += np.sum((leapsec_mjds >= other.mjd) & (leapsec_mjds < self.mjd))
         second_diff += self.offset - other.offset
         return second_diff
+
+    @property
+    def delayed(self):
+        return isinstance(self.offset, da.Array)
+
+    def compute(self):
+        if self.delayed:
+            offset = self.offset.compute()
+            return Time(self.mjd, self.second, offset)
+        else:
+            return self
 
     @classmethod
     def from_mjd(cls, mjd, smear_leapsec=False):

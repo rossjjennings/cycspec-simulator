@@ -180,11 +180,14 @@ class BasebandData:
             raise ValueError(f"A and B should be the same shape! Found: {A.shape} != {B.shape}")
         self.A = A
         self.B = B
-        self.delayed = isinstance(A, da.Array)
         self.start_time = start_time
         self.feed_poln = feed_poln.upper()
         self.bandwidth = bandwidth
         self.obsfreq = obsfreq
+
+    @property
+    def delayed(self):
+        return isinstance(self.A, da.Array)
 
     @property
     def n_samples(self):
