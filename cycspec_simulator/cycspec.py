@@ -119,7 +119,7 @@ signatures = [
 ]
 
 @nb.njit(signatures, parallel=True)
-def corrfold_cpu(A, B, nlag, nbin, binplan, include_end=False):
+def corrfold_numba(A, B, nlag, nbin, binplan, include_end=False):
     """
     Compute the cyclic autocorrelation function from sampled data.
     This function is intended to be used internally by cycfold_cpu().
@@ -169,8 +169,36 @@ def corrfold_cpu(A, B, nlag, nbin, binplan, include_end=False):
     corr_BB /= samples
     return corr_AA, corr_AB, corr_BA, corr_BB, samples
 
+def corrfold_cpu(A, B, nlag, nbin, binplan, include_end=False,
+                 n_threads=nb.config.NUMBA_NUM_THREADS):
+    """
+    Wrap the compiled Numba function to clean up output and measure performance.
+
+    Parameters
+    ----------
+    A, B: Baseband samples in each of two polarizations (each of length n)
+    nlag: Number of lags to use for the correlation
+    nbin: Number of phase bins in which to accumulate
+    binplan: Array giving the phase bin corresponding to each half-sample time
+          (length 2*n, where n is the number of samples)
+    include_end: Whether to calculate products where the first sample is among
+          the last nlag - ilag - 1 samples. In such cases, there are fewer than
+          nlag choices for the second sample. Setting include_end=True means that
+          slightly more samples will contribute to lower lags.
+    """
+    timer = CPUTimer()
+    with timer, NumbaThreads(n_threads):
+        AA, AB, BA, BB, samples = corrfold_numba(
+            A, B, nlag, nbin, binplan, include_end
+        )
+    CR = (AB + BA)/2
+    CI = (AB - BA)/np.array(2j).astype(A.dtype)
+    elapsed = np.array(timer.elapsed, dtype=np.float64)
+
+    return AA, BB, CR, CI, samples, elapsed
+
 def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
-                n_threads=nb.config.NUMBA_NUM_THREADS):
+                n_threads=nb.config.NUMBA_NUM_THREADS, n_workers=None):
     """
     Compute the periodic spectrum from sampled data.
 
@@ -186,9 +214,12 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
     n_threads: Number of CPU threads to use. Defaults to the total number of
           available CPUs, as detected by Numba.
     """
+    complex_dtype = data.A.dtype
+    print(f"Input dtype: {complex_dtype}")
     nlag = ncyc//2 + 1
-    t_span = data.n_samples/np.abs(data.bandwidth)
 
+    # construct the bin plan
+    t_span = data.n_samples/np.abs(data.bandwidth)
     if data.delayed:
         chunks, = data.A.chunks
         def linspace(*args, **kwargs):
@@ -206,45 +237,46 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
     binplan = (np.round((phase % 1)*nbin)).astype(np.int64) % nbin
 
     if data.delayed:
-        corr_AA, corr_AB, corr_BA, corr_BB, samples = [], [], [], [], []
+        AA, BB, CR, CI, samples, elapsed = [], [], [], [], [], []
         A = da.overlap.overlap(data.A, depth={0: (0, nlag - 1)}, boundary=None)
         B = da.overlap.overlap(data.B, depth={0: (0, nlag - 1)}, boundary=None)
         binplan = da.overlap.overlap(binplan, depth={0: (0, 2*nlag - 2)}, boundary=None)
         for A_blk, B_blk, plan_blk in zip(A.blocks, B.blocks, binplan.blocks):
-            corrfold = dask.delayed(corrfold_cpu, nout=5)
-            AA_blk, AB_blk, BA_blk, BB_blk, samples_blk = corrfold(
+            corrfold = dask.delayed(corrfold_cpu, nout=6)
+            AA_blk, BB_blk, CR_blk, CI_blk, samples_blk, elapsed_blk = corrfold(
                 A_blk, B_blk, nlag, nbin, plan_blk, include_end
             )
-            corr_AA.append(da.from_delayed(AA_blk, (nlag, nbin), dtype=data.A.dtype))
-            corr_AB.append(da.from_delayed(AB_blk, (nlag, nbin), dtype=data.A.dtype))
-            corr_BA.append(da.from_delayed(BA_blk, (nlag, nbin), dtype=data.A.dtype))
-            corr_BB.append(da.from_delayed(BB_blk, (nlag, nbin), dtype=data.A.dtype))
+            AA.append(da.from_delayed(AA_blk, (nlag, nbin), dtype=data.A.dtype))
+            BB.append(da.from_delayed(BB_blk, (nlag, nbin), dtype=data.A.dtype))
+            CR.append(da.from_delayed(CR_blk, (nlag, nbin), dtype=data.A.dtype))
+            CI.append(da.from_delayed(CI_blk, (nlag, nbin), dtype=data.A.dtype))
             samples.append(da.from_delayed(samples_blk, (nlag, nbin), dtype=np.int64))
-        corr_AA = da.mean(da.stack(corr_AA), axis=0)
-        corr_AB = da.mean(da.stack(corr_AB), axis=0)
-        corr_BA = da.mean(da.stack(corr_BA), axis=0)
-        corr_BB = da.mean(da.stack(corr_BB), axis=0)
+            elapsed.append(da.from_delayed(elapsed_blk, (), dtype=np.float64))
+        AA = da.mean(da.stack(AA), axis=0)
+        BB = da.mean(da.stack(BB), axis=0)
+        CR = da.mean(da.stack(CR), axis=0)
+        CI = da.mean(da.stack(CI), axis=0)
         samples = da.sum(da.stack(samples), axis=0)
-        corr_AA, corr_AB, corr_BA, corr_BB, samples = dask.compute(
-            corr_AA, corr_AB, corr_BA, corr_BB, samples
+        elapsed = da.sum(da.stack(elapsed), axis=0)
+        AA, BB, CR, CI, samples, elapsed = dask.compute(
+            AA, BB, CR, CI, samples, elapsed, num_workers=n_workers,
         )
         print(f"Total products accumulated: {4*np.sum(samples)}")
-    else:
-        timer = CPUTimer()
-        with timer, NumbaThreads(n_threads):
-            corr_AA, corr_AB, corr_BA, corr_BB, samples = corrfold_cpu(
-                data.A, data.B, nlag, nbin, binplan, include_end
-            )
-        print(f"Elapsed time: {timer.elapsed:g} ms")
-        print(f"Total products accumulated: {4*np.sum(samples)}")
-        throughput = 4*np.sum(samples)/(timer.elapsed/1000)
+        print(f"Elapsed time in numba: {elapsed:g} ms")
+        throughput = 4*np.sum(samples)/(elapsed/1000)
         print(f"Throughput: {throughput:g} products/sec.")
-    corr_CR = (corr_AB + corr_BA)/2
-    corr_CI = (corr_AB - corr_BA)/np.array(2j).astype(data.A.dtype)
-    pspec_AA = np.fft.fftshift(np.fft.hfft(corr_AA, axis=0), axes=0)
-    pspec_BB = np.fft.fftshift(np.fft.hfft(corr_BB, axis=0), axes=0)
-    pspec_CR = np.fft.fftshift(np.fft.hfft(corr_CR, axis=0), axes=0)
-    pspec_CI = np.fft.fftshift(np.fft.hfft(corr_CI, axis=0), axes=0)
+    else:
+        AA, BB, CR, CI, samples, elapsed = corrfold_cpu(
+            data.A, data.B, nlag, nbin, binplan, include_end
+        )
+        print(f"Total products accumulated: {4*np.sum(samples)}")
+        print(f"Elapsed time: {elapsed:g} ms")
+        throughput = 4*np.sum(samples)/(elapsed/1000)
+        print(f"Throughput: {throughput:g} products/sec.")
+    pspec_AA = np.fft.fftshift(np.fft.hfft(AA, axis=0), axes=0)
+    pspec_BB = np.fft.fftshift(np.fft.hfft(BB, axis=0), axes=0)
+    pspec_CR = np.fft.fftshift(np.fft.hfft(CR, axis=0), axes=0)
+    pspec_CI = np.fft.fftshift(np.fft.hfft(CI, axis=0), axes=0)
     bandwidth = data.bandwidth
     freq = data.obsfreq + np.linspace(-bandwidth/2, bandwidth/2, ncyc, endpoint=False)
 

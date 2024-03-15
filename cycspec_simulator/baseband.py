@@ -215,7 +215,7 @@ class BasebandData:
             return self
 
     def cycfold(self, nchan, nbin, predictor, use_cuda=have_cuda,
-                n_threads=nb.config.NUMBA_NUM_THREADS):
+                n_threads=nb.config.NUMBA_NUM_THREADS, n_workers=None):
         """
         Compute the periodic spectrum from baseband data.
 
@@ -230,9 +230,11 @@ class BasebandData:
                    CPUs, as detected by Numba. Has no effect if use_gpu is True.
         """
         if use_cuda and have_cuda:
-            return cycfold_gpu(self, nchan, nbin, predictor)
+            return cycfold_gpu(self, nchan, nbin, predictor, n_workers=n_workers)
         elif use_cuda:
             err = ValueError("use_cuda was specified, but no CUDA device was found")
             raise err from cuda_failure
         else:
-            return cycfold_cpu(self, nchan, nbin, predictor, n_threads=n_threads)
+            return cycfold_cpu(
+                self, nchan, nbin, predictor, n_threads=n_threads, n_workers=n_workers
+            )

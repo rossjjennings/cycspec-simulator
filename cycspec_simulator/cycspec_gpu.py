@@ -156,11 +156,13 @@ def corrfold_gpu(A, B, nlag, nbin, binplan, stream, include_end=False):
     # so should make it possible to achieve full occupancy on either.
     nthreads_block = 512
 
-    corrfold_kernel[nlag, nthreads_block, stream](
-        A_gpu, B_gpu, nbin, binplan, samples,
-        AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag,
-        include_end
-    )
+    with CUDATimer(stream) as cudatimer:
+        corrfold_kernel[nlag, nthreads_block, stream](
+            A_gpu, B_gpu, nbin, binplan, samples,
+            AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag,
+            include_end
+        )
+    elapsed = np.array(cudatimer.elapsed, dtype=np.float64)
 
     i = cupy.array(1j, dtype=complex_dtype)
     AA = (AA_real + i*AA_imag)/samples
@@ -173,9 +175,9 @@ def corrfold_gpu(A, B, nlag, nbin, binplan, stream, include_end=False):
     CI = CI.reshape(nlag, nbin)
     samples = samples.reshape(nlag, nbin)
 
-    return AA, BB, CR, CI, samples
+    return AA, BB, CR, CI, samples, elapsed
 
-def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False):
+def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=None):
     """
     Compute the periodic spectrum from sampled data, using CUDA.
 
@@ -216,10 +218,10 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False):
         A = da.overlap.overlap(data.A, depth={0: (0, nlag - 1)}, boundary=None)
         B = da.overlap.overlap(data.B, depth={0: (0, nlag - 1)}, boundary=None)
         binplan = da.overlap.overlap(binplan, depth={0: (0, 2*nlag - 2)}, boundary=None)
-        AA, BB, CR, CI, samples = [], [], [], [], []
+        AA, BB, CR, CI, samples, elapsed = [], [], [], [], [], []
         for A_blk, B_blk, plan_blk in zip(A.blocks, B.blocks, binplan.blocks):
-            corrfold = dask.delayed(corrfold_gpu, nout=5)
-            AA_blk, BB_blk, CR_blk, CI_blk, samples_blk = corrfold(
+            corrfold = dask.delayed(corrfold_gpu, nout=6)
+            AA_blk, BB_blk, CR_blk, CI_blk, samples_blk, elapsed_blk = corrfold(
                 A_blk, B_blk, nlag, nbin, plan_blk, stream, include_end
             )
             AA.append(da.from_delayed(AA_blk, (nlag, nbin), dtype=data.A.dtype))
@@ -227,23 +229,27 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False):
             CR.append(da.from_delayed(CR_blk, (nlag, nbin), dtype=data.A.dtype))
             CI.append(da.from_delayed(CI_blk, (nlag, nbin), dtype=data.A.dtype))
             samples.append(da.from_delayed(samples_blk, (nlag, nbin), dtype=np.int64))
+            elapsed.append(da.from_delayed(elapsed_blk, (), dtype=np.float64))
         AA = da.mean(da.stack(AA), axis=0)
         BB = da.mean(da.stack(BB), axis=0)
         CR = da.mean(da.stack(CR), axis=0)
         CI = da.mean(da.stack(CI), axis=0)
         samples = da.sum(da.stack(samples), axis=0)
-        AA, BB, CR, CI, samples = dask.compute(
-            AA, BB, CR, CI, samples
+        elapsed = da.sum(da.stack(elapsed), axis=0)
+        AA, BB, CR, CI, samples, elapsed = dask.compute(
+            AA, BB, CR, CI, samples, elapsed, num_workers=n_workers
         )
         print(f"Total products accumulated: {4*np.sum(samples)}")
+        print(f"Elapsed time in kernel: {elapsed:g} ms")
+        throughput = 4*np.sum(samples)/(elapsed/1000)
+        print(f"Throughput: {throughput:g} products/sec.")
     else:
-        with CUDATimer(stream) as cudatimer:
-            AA, BB, CR, CI, samples = corrfold_gpu(
-                data.A, data.B, nlag, nbin, binplan, stream, include_end
-            )
-        print(f"Elapsed time: {cudatimer.elapsed:g} ms")
+        AA, BB, CR, CI, samples, elapsed = corrfold_gpu(
+            data.A, data.B, nlag, nbin, binplan, stream, include_end
+        )
+        print(f"Elapsed time: {elapsed:g} ms")
         print(f"Total products accumulated: {4*np.sum(samples)}")
-        throughput = 4*np.sum(samples)/(cudatimer.elapsed/1000)
+        throughput = 4*np.sum(samples)/(elapsed/1000)
         print(f"Throughput: {throughput:g} products/sec.")
     cuda.profile_stop()
 
