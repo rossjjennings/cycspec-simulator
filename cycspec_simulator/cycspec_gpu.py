@@ -1,7 +1,9 @@
 import numpy as np
-import cupy
 import numba as nb
 from numba import cuda
+import dask
+import dask.array as da
+import cupy
 
 from .polarization import coherence_to_stokes
 from .time import Time
@@ -65,9 +67,9 @@ signatures = [
 ]
 
 @cuda.jit(signatures)
-def corrfold_gpu(A, B, nbin, binplan, n_samples,
-                 AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag,
-                 include_end=False):
+def corrfold_kernel(A, B, nbin, binplan, n_samples,
+                    AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag,
+                    include_end=False):
     """
     Compute the cyclic autocorrelation function from sampled data, using CUDA.
     This CUDA kernel is intended to be used internally by cycfold_gpu().
@@ -114,6 +116,65 @@ def corrfold_gpu(A, B, nbin, binplan, n_samples,
         cuda.atomic.add(BB_real, ibuf, product_BB.real)
         cuda.atomic.add(BB_imag, ibuf, product_BB.imag)
 
+def corrfold_gpu(A, B, nlag, nbin, binplan, stream, include_end=False):
+    """
+    Wrap the CUDA kernel into something more directly analogous to corrfold_cpu.
+    Copies data to GPU, allocates GPU memory, invokes the kernel, and cleans up output.
+    Dask doesn't understand out parameters and so can't invoke the kernel directly,
+    but it can invoke this function.
+
+    Parameters
+    ----------
+    A, B: Baseband samples in each of two polarizations (each of length n)
+    nlag: Number of lags to use for the correlation
+    nbin: Number of phase bins in which to accumulate
+    binplan: Array giving the phase bin corresponding to each half-sample time
+          (length 2*n, where n is the number of samples)
+    stream: CUDA stream to use
+    include_end: Whether to calculate products where the first sample is among
+          the last nlag - ilag - 1 samples. In such cases, there are fewer than
+          nlag choices for the second sample. Setting include_end=True means that
+          slightly more samples will contribute to lower lags.
+    """
+    complex_dtype = A.dtype
+    real_dtype = A.real.dtype
+    A_gpu = cupy.array(A)
+    B_gpu = cupy.array(B)
+    binplan = cupy.array(binplan)
+    samples = cupy.zeros(nlag*nbin, dtype=np.int32)
+    AA_real = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    AA_imag = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    AB_real = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    AB_imag = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    BA_real = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    BA_imag = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    BB_real = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    BB_imag = cupy.zeros(nlag*nbin, dtype=real_dtype)
+
+    # Number of threads per CUDA thread block.
+    # Turing has 1024 threads per SM, Ampere has 1536. 512 is the gcd of these,
+    # so should make it possible to achieve full occupancy on either.
+    nthreads_block = 512
+
+    corrfold_kernel[nlag, nthreads_block, stream](
+        A_gpu, B_gpu, nbin, binplan, samples,
+        AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag,
+        include_end
+    )
+
+    i = cupy.array(1j, dtype=complex_dtype)
+    AA = (AA_real + i*AA_imag)/samples
+    AA = AA.reshape(nlag, nbin)
+    BB = (BB_real + i*BB_imag)/samples
+    BB = BB.reshape(nlag, nbin)
+    CR = (AB_real + BA_real + i*(AB_imag + BA_imag))/(2*samples)
+    CR = CR.reshape(nlag, nbin)
+    CI = (AB_real - BA_real + i*(AB_imag - BA_imag))/(2*i*samples)
+    CI = CI.reshape(nlag, nbin)
+    samples = samples.reshape(nlag, nbin)
+
+    return AA, BB, CR, CI, samples
+
 def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False):
     """
     Compute the periodic spectrum from sampled data, using CUDA.
@@ -129,53 +190,63 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False):
     include_end: Passed along to corrfold_gpu(), see there for details.
     """
     complex_dtype = data.A.dtype
-    real_dtype = data.A.real.dtype
     print(f"Input dtype: {complex_dtype}")
     nlag = ncyc//2 + 1
-    A_gpu = cupy.array(data.A)
-    B_gpu = cupy.array(data.B)
 
     # construct the bin plan
-    offset = np.empty(2*data.t.offset.size - 1)
-    offset[::2] = data.t.offset
-    offset[1::2] = (data.t.offset[1:] + data.t.offset[:-1])/2
-    t = Time(data.t.mjd, data.t.second, offset)
+    t_span = data.n_samples/np.abs(data.bandwidth)
+    if data.delayed:
+        chunks, = data.A.chunks
+        def linspace(*args, **kwargs):
+            return da.linspace(*args, chunks=2*chunks[0], **kwargs)
+    else:
+        linspace = np.linspace
+    offset = linspace(0, t_span, 2*data.n_samples, endpoint=False)
+    t = Time(
+        data.start_time.mjd,
+        data.start_time.second,
+        data.start_time.offset + offset,
+    )
     phase = phase_predictor.phase(t)
-    binplan = np.int64(np.round((phase % 1)*nbin)) % nbin
-    binplan = cupy.array(binplan)
+    binplan = (np.round((phase % 1)*nbin)).astype(np.int64) % nbin
 
-    n_samples = cupy.zeros(nlag*nbin, dtype=np.int32)
-    AA_real = cupy.zeros(nlag*nbin, dtype=real_dtype)
-    AA_imag = cupy.zeros(nlag*nbin, dtype=real_dtype)
-    AB_real = cupy.zeros(nlag*nbin, dtype=real_dtype)
-    AB_imag = cupy.zeros(nlag*nbin, dtype=real_dtype)
-    BA_real = cupy.zeros(nlag*nbin, dtype=real_dtype)
-    BA_imag = cupy.zeros(nlag*nbin, dtype=real_dtype)
-    BB_real = cupy.zeros(nlag*nbin, dtype=real_dtype)
-    BB_imag = cupy.zeros(nlag*nbin, dtype=real_dtype)
     stream = cuda.stream()
-    with CUDATimer(stream) as cudatimer:
-        cuda.profile_start()
-        corrfold_gpu[nlag, 512, stream](
-            A_gpu, B_gpu, nbin, binplan, n_samples,
-            AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag,
-            include_end,
+    cuda.profile_start()
+    if data.delayed:
+        A = da.overlap.overlap(data.A, depth={0: (0, nlag - 1)}, boundary=None)
+        B = da.overlap.overlap(data.B, depth={0: (0, nlag - 1)}, boundary=None)
+        binplan = da.overlap.overlap(binplan, depth={0: (0, 2*nlag - 2)}, boundary=None)
+        AA, BB, CR, CI, samples = [], [], [], [], []
+        for A_blk, B_blk, plan_blk in zip(A.blocks, B.blocks, binplan.blocks):
+            corrfold = dask.delayed(corrfold_gpu, nout=5)
+            AA_blk, BB_blk, CR_blk, CI_blk, samples_blk = corrfold(
+                A_blk, B_blk, nlag, nbin, plan_blk, stream, include_end
+            )
+            AA.append(da.from_delayed(AA_blk, (nlag, nbin), dtype=data.A.dtype))
+            BB.append(da.from_delayed(BB_blk, (nlag, nbin), dtype=data.A.dtype))
+            CR.append(da.from_delayed(CR_blk, (nlag, nbin), dtype=data.A.dtype))
+            CI.append(da.from_delayed(CI_blk, (nlag, nbin), dtype=data.A.dtype))
+            samples.append(da.from_delayed(samples_blk, (nlag, nbin), dtype=np.int64))
+        AA = da.mean(da.stack(AA), axis=0)
+        BB = da.mean(da.stack(BB), axis=0)
+        CR = da.mean(da.stack(CR), axis=0)
+        CI = da.mean(da.stack(CI), axis=0)
+        samples = da.sum(da.stack(samples), axis=0)
+        AA, BB, CR, CI, samples = dask.compute(
+            AA, BB, CR, CI, samples
         )
-        cuda.profile_stop()
-    print(f"Elapsed time: {cudatimer.elapsed:g} ms")
-    print(f"Total products accumulated: {4*np.sum(n_samples)}")
-    throughput = 4*np.sum(n_samples)/(cudatimer.elapsed/1000)
-    print(f"Throughput: {throughput:g} products/sec.")
-    i = cupy.array(1j, dtype=complex_dtype)
+        print(f"Total products accumulated: {4*np.sum(samples)}")
+    else:
+        with CUDATimer(stream) as cudatimer:
+            AA, BB, CR, CI, samples = corrfold_gpu(
+                data.A, data.B, nlag, nbin, binplan, stream, include_end
+            )
+        print(f"Elapsed time: {cudatimer.elapsed:g} ms")
+        print(f"Total products accumulated: {4*np.sum(samples)}")
+        throughput = 4*np.sum(samples)/(cudatimer.elapsed/1000)
+        print(f"Throughput: {throughput:g} products/sec.")
+    cuda.profile_stop()
 
-    AA = (AA_real + i*AA_imag)/n_samples
-    AA = AA.reshape(nlag, nbin)
-    BB = (BB_real + i*BB_imag)/n_samples
-    BB = BB.reshape(nlag, nbin)
-    CR = (AB_real + BA_real + i*(AB_imag + BA_imag))/(2*n_samples)
-    CR = CR.reshape(nlag, nbin)
-    CI = (AB_real - BA_real + i*(AB_imag - BA_imag))/(2*i*n_samples)
-    CI = CI.reshape(nlag, nbin)
     pspec_AA = np.fft.fftshift(np.fft.hfft(AA.get(), axis=0), axes=0)
     pspec_AA = pspec_AA.reshape(ncyc, nbin)
     pspec_BB = np.fft.fftshift(np.fft.hfft(BB.get(), axis=0), axes=0)
@@ -196,4 +267,3 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False):
     )
     pspec = PeriodicSpectrum(freq, data.start_time, I, Q, U, V)
     return pspec
-
