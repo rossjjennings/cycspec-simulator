@@ -201,7 +201,7 @@ class BasebandData:
         sample_freq = np.abs(self.bandwidth)
         return n_samples/sample_freq
 
-    def compute_all(self):
+    def compute(self):
         if self.delayed:
             return BasebandData(
                 self.A.compute(),
