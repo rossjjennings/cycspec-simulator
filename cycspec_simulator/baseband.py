@@ -109,10 +109,11 @@ class BasebandModel:
         if delayed:
             chunk_sizes = list(da.core.normalize_chunks(chunks, shape=(n_samples,))[0])
             for filtr in self.filters:
-                chunk_sizes[0] += filtr.n_samples - 1
+                chunk_sizes[0] += filtr.nlag_pos
+                chunk_sizes[-1] += filtr.nlag_neg
             chunks = (tuple(chunk_sizes),)
         for filtr in self.filters:
-            n_samples += filtr.n_samples - 1
+            n_samples += filtr.nlag_pos + filtr.nlag_neg
 
         t = get_time_axis(t_start, n_samples, self.bandwidth, delayed=delayed)
         phase = self.predictor.phase(t) - int(self.predictor.phase(t_start))

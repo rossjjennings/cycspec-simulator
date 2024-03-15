@@ -2,6 +2,7 @@ from .template_profile import TemplateProfile
 from .baseband import BasebandModel, BasebandData
 from .phase_predictor import FreqOnlyPredictor, PolynomialPredictor
 from .scattering import ExponentialScatteringModel
+from .dispersion import DispersionFilter
 from .interpolation import fft_roll, fft_interp, lerp
 from .cycspec import cycfold_cpu
 from .folding import fold

@@ -7,7 +7,7 @@ from .baseband import BasebandData
 from .linear_filter import LinearFilter
 
 class ExponentialScatteringModel:
-    def __init__(self, scattering_time, bandwidth, obsfreq=0, cutoff=15, rng=None):
+    def __init__(self, scattering_time, bandwidth, obsfreq=0, cutoff=15):
         """
         Create an exponential scattering model.
 
@@ -23,21 +23,24 @@ class ExponentialScatteringModel:
         self.bandwidth = bandwidth
         self.obsfreq = obsfreq
         self.cutoff = cutoff
-        if rng is None:
-            self.rng = np.random.default_rng()
-        else:
-            self.rng = rng
 
-    def realize(self):
+    def realize(self, rng=None):
         """
         Create a realization of this scattering model (a ScatteringFilter).
+
+        Parameters
+        ----------
+        rng: `RandomNumberGenerator` object used to generate the realization.
         """
+        if rng is None:
+            rng = np.random.default_rng()
+
         # generate pattern across full bandwidth
         dt = 1/self.bandwidth
         n_samples = np.int64(self.cutoff*self.scattering_time*self.bandwidth)
         time = np.linspace(0, n_samples*dt, n_samples, endpoint=False)
         envelope = np.exp(-time/self.scattering_time)*dt/self.scattering_time
-        noise = (self.rng.normal(size=n_samples) + 1j*self.rng.normal(size=n_samples))/2
+        noise = (rng.normal(size=n_samples) + 1j*rng.normal(size=n_samples))/2
         impulse_response = np.sqrt(envelope)*noise
 
         return ScatteringFilter(
@@ -55,18 +58,31 @@ class ScatteringFilter(LinearFilter):
         ----------
         impulse_response: Impulse response function, sampled at the given bandwidth.
         bandwidth: sampling frequency of the provided impulse response data.
+        obsfreq: observing frequency of data the filter is to be applied to.
         """
         self.impulse_response = impulse_response
         self.bandwidth = bandwidth
         self.obsfreq = obsfreq
-        self.n_samples = impulse_response.size
-        tspan = self.n_samples/self.bandwidth
-        self.time = np.linspace(0, tspan, self.n_samples, endpoint=False)
+        n_samples = impulse_response.size
+        tspan = impulse_response.size/self.bandwidth
+        self.time = np.linspace(0, tspan, n_samples, endpoint=False)
         self.filter_function = np.fft.fft(impulse_response, axis=-1)
         self.filter_function = np.fft.fftshift(self.filter_function, axes=-1)
-        self.freq = np.fft.fftfreq(self.n_samples, d=1/self.bandwidth)
+        self.freq = np.fft.fftfreq(n_samples, d=1/self.bandwidth)
         self.freq = np.fft.fftshift(self.freq)
         self.freq += self.obsfreq
+
+    @property
+    def n_samples(self):
+        return self.impulse_response.size
+
+    @property
+    def nlag_neg(self):
+        return 0
+
+    @property
+    def nlag_pos(self):
+        return self.impulse_response.size - 1
 
     def plot_impulse_response(self, ax=None, **kwargs):
         """
