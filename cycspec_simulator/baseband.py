@@ -105,10 +105,15 @@ class BasebandModel:
         if rng is None:
             rng = np.random.default_rng()
 
+        delayed = isinstance(rng, DelayedRNG)
+        if delayed:
+            chunk_sizes = list(da.core.normalize_chunks(chunks, shape=(n_samples,))[0])
+            for filtr in self.filters:
+                chunk_sizes[0] += filtr.n_samples - 1
+            chunks = (tuple(chunk_sizes),)
         for filtr in self.filters:
             n_samples += filtr.n_samples - 1
 
-        delayed = isinstance(rng, DelayedRNG)
         t = get_time_axis(t_start, n_samples, self.bandwidth, delayed=delayed)
         phase = self.predictor.phase(t) - int(self.predictor.phase(t_start))
         binno = (phase*self.template.nbin).astype(dtype)
@@ -139,8 +144,10 @@ class BasebandModel:
         for filtr in self.filters:
             data = filtr.apply(data)
 
-        noise3 = complex_white_noise(data.n_samples, rng, dtype, chunks)
-        noise4 = complex_white_noise(data.n_samples, rng, dtype, chunks)
+        if delayed:
+            chunks=data.A.chunks
+        noise3 = complex_white_noise(data.n_samples, rng, dtype, chunks=chunks)
+        noise4 = complex_white_noise(data.n_samples, rng, dtype, chunks=chunks)
         data.A += np.sqrt(np.float32(self.noise_level)/2)*noise3
         data.B += np.sqrt(np.float32(self.noise_level)/2)*noise4
 

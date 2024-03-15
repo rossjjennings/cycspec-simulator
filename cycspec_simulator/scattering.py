@@ -1,4 +1,5 @@
 import numpy as np
+import dask.array as da
 import matplotlib.pyplot as plt
 from scipy.signal import convolve
 
@@ -143,18 +144,25 @@ class ScatteringFilter(LinearFilter):
             raise ValueError(f"Data observing frequency ({data.obsfreq} Hz) "
                              f"and channel bandwidth ({data.bandwidth} Hz) "
                              "do not match this scintillation pattern")
-        new_size = data.A.size - self.impulse_response.size + 1
-        A_new = np.empty(new_size, data.A.dtype)
-        B_new = np.empty(new_size, data.B.dtype)
 
-        # If data is 32-bit, keep it that way
+        # Avoid unnecessary dtype promotion
         irf = self.impulse_response.astype(data.A.dtype)
-        A_new = convolve(data.A, irf, mode='valid')
-        B_new = convolve(data.B, irf, mode='valid')
+        nlag_irf = self.impulse_response.size - 1
+
+        if data.delayed:
+            A = da.overlap.overlap(data.A, depth={0: (nlag_irf, 0)}, boundary=None)
+            B = da.overlap.overlap(data.B, depth={0: (nlag_irf, 0)}, boundary=None)
+            chunks = ([chunk - nlag_irf for chunk in A.chunks[0]],)
+            A = da.map_blocks(convolve, A, irf, mode='valid', chunks=chunks)
+            B = da.map_blocks(convolve, B, irf, mode='valid', chunks=chunks)
+            t = data.t[nlag_irf].compute()
+        else:
+            new_size = data.A.size - nlag_irf
+            A = convolve(data.A, irf, mode='valid')
+            B = convolve(data.B, irf, mode='valid')
+            t = data.t[nlag_irf]
         return BasebandData(
-            A_new,
-            B_new,
-            data.t[self.impulse_response.size - 1],
+            A, B, t,
             data.feed_poln,
             data.bandwidth,
             data.obsfreq,
