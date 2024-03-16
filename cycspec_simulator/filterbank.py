@@ -1,6 +1,6 @@
 import numpy as np
 import numba as nb
-from scipy import signal
+from scipy import signal, fft
 
 from .baseband import BasebandData
 from .interpolation import lerp
@@ -44,7 +44,8 @@ def pfb(x, nchan, ntap, window="hamming", fs=1.0):
     xs = np.zeros((ns_chan-ntap+1, nchan), dtype=x.dtype)
     for ichan in range(nchan):
         xs[:,ichan] = signal.correlate(x[:,ichan], h[:,ichan], mode="valid")
-    xpfb = np.fft.fft(xs, nchan, axis=1)
+    # need scipy fft to avoid dtype promotion
+    xpfb = fft.fft(xs, nchan, axis=1)
     xpfb *= np.sqrt(nchan)
 
     return xpfb

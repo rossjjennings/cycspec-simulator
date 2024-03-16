@@ -1,5 +1,6 @@
 import numpy as np
 import dask.array as da
+from scipy import fft
 
 from .linear_filter import LinearFilter
 from .baseband import BasebandData
@@ -43,8 +44,9 @@ class DispersionFilter(LinearFilter):
         return np.exp(2j*np.pi*a*x**2/(1 + x))
 
     def apply_block(self, block):
-        H = self.filter_function(block.shape[-1])
-        return np.fft.ifft(H*np.fft.fft(block))
+        H = self.filter_function(block.shape[-1]).astype(block.dtype)
+        # need scipy fft to avoid dtype promotion
+        return fft.ifft(H*fft.fft(block))
 
     def apply(self, data):
         """
@@ -56,7 +58,6 @@ class DispersionFilter(LinearFilter):
                              f"and channel bandwidth ({data.bandwidth} Hz) "
                              "do not match this scintillation pattern")
 
-        # Avoid unnecessary dtype promotion
         ndm = self.ndm
 
         if data.delayed:
