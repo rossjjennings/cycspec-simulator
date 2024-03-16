@@ -80,7 +80,7 @@ class BasebandModel:
         self.filters.append(filtr)
 
     def sample(self, n_samples, t_start=None, interp=lerp, dtype=np.float32,
-               rng=None, chunks=2**23):
+               rng=None, chunks='auto'):
         """
         Simulate a given number of samples from the modeled baseband time series.
 
@@ -107,7 +107,9 @@ class BasebandModel:
 
         delayed = isinstance(rng, DelayedRNG)
         if delayed:
-            chunk_sizes = list(da.core.normalize_chunks(chunks, shape=(n_samples,))[0])
+            chunk_sizes = list(
+                da.core.normalize_chunks(chunks, shape=(n_samples,), dtype=dtype)[0]
+            )
             for filtr in self.filters:
                 chunk_sizes[0] += filtr.nlag_pos
                 chunk_sizes[-1] += filtr.nlag_neg

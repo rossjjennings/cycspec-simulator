@@ -3,8 +3,9 @@ import numba as nb
 import dask.array as da
 from scipy import signal, fft
 
-from .baseband import BasebandData
+from .baseband import BasebandData, DelayedRNG
 from .interpolation import lerp
+from .time import Time
 from .cycspec import PeriodicSpectrum, cycfold_cpu
 from .cuda import have_cuda, cuda_failure
 if have_cuda:
@@ -64,7 +65,9 @@ def channelize(data, nchan, ntap=24, window="hamming", rechunk=True):
     window: Window function used for polyphase filterbank
             (string interpreted by `scipy.signal.get_window()`)
     rechunk: Whether to re-chunk the input arrays so that the
-             chunk size is a multiple of `nchan`.
+             chunk size is a multiple of `nchan`. Without this,
+             some samples will be skipped at block boundaries,
+             leading to a slight drift.
 
     Returns
     -------
@@ -126,7 +129,8 @@ class ChannelizedModel:
     def chan_bw(self):
         return self.baseband_model.bandwidth/self.nchan
 
-    def sample(self, n_samples, t_start=None, interp=lerp, dtype=np.float32):
+    def sample(self, n_samples, t_start=None, interp=lerp, dtype=np.float32,
+               rng=None, chunks=(-1, 'auto')):
         """
         Simulate a specified number of samples in each channel.
 
@@ -139,7 +143,25 @@ class ChannelizedModel:
         interp: Interpolation function to use. Passed to `BasebandModel.sample()`.
         dtype: Numpy dtype to use for samples.
         """
-        data = self.baseband_model.sample(n_samples, t_start, interp, dtype)
+        nlag = self.nchan*(self.ntap - 1)
+        n_baseband = self.nchan*n_samples + nlag
+
+        delayed = isinstance(rng, DelayedRNG)
+        if delayed:
+            shape = (self.nchan, n_samples)
+            chunks = da.core.normalize_chunks(chunks, shape=shape, dtype=dtype)
+            chunk_sizes = list(self.nchan*chunk for chunk in chunks[1])
+            chunk_sizes[0] += nlag
+            chunks_baseband = (tuple(chunk_sizes),)
+
+        if t_start is None:
+            t_start = self.baseband_model.predictor.epoch
+
+        offset = t_start.offset - nlag/self.baseband_model.bandwidth
+        t_start = Time(t_start.mjd, t_start.second, offset)
+        data = self.baseband_model.sample(
+            n_baseband, t_start, interp, dtype, rng=rng, chunks=chunks_baseband
+        )
         return channelize(data, self.nchan, self.ntap, self.window)
 
 class ChannelizedData:

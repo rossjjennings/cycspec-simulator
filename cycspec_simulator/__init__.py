@@ -8,7 +8,7 @@ from .cycspec import cycfold_cpu
 from .folding import fold
 from .time import Time
 from .metadata import ObservingMetadata
-from .filterbank import channelize
+from .filterbank import channelize, ChannelizedModel
 from .cuda import have_cuda
 if have_cuda:
     from .cycspec_gpu import cycfold_gpu
