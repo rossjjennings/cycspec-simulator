@@ -3,7 +3,7 @@ import numba as nb
 import dask.array as da
 from scipy import signal, fft
 
-from .baseband import BasebandData, DelayedRNG
+from .baseband import BasebandData, DelayedRNG, get_time_axis
 from .interpolation import lerp
 from .time import Time
 from .cycspec import PeriodicSpectrum, cycfold_cpu
@@ -89,7 +89,7 @@ def channelize(data, nchan, ntap=24, window="hamming", rechunk=True):
             chunks=chunks
         )
         B_pfb = da.map_overlap(
-            pfb, data.A, nchan=nchan, ntap=ntap, window=window, fs=data.bandwidth,
+            pfb, data.B, nchan=nchan, ntap=ntap, window=window, fs=data.bandwidth,
             depth={0: (nchan*(ntap-1), 0)}, boundary=None, dtype=data.A.dtype,
             chunks=chunks
         )
@@ -200,6 +200,11 @@ class ChannelizedData:
         n_samples = self.A.shape[-1]
         sample_freq = np.abs(self.chan_bw)
         return n_samples/sample_freq
+
+    @property
+    def t(self):
+        sample_freq = np.abs(self.chan_bw)
+        return get_time_axis(self.start_time, self.n_samples, sample_freq, self.delayed)
 
     @property
     def delayed(self):

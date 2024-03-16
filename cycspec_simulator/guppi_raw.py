@@ -193,8 +193,7 @@ def read_raw(filename, use_dask=True, include_overlap=True):
 def read(filename):
     raw = read_raw(filename, use_dask=True, include_overlap=True)
     last_overlap = raw.data[:, -raw.overlap:]
-    trimmed_data = da.overlap.trim_overlap(raw.data, depth={1: (0, raw.overlap)})
-    data = da.concatenate([trimmed_data, last_overlap], axis=1)
+    data = da.overlap.trim_overlap(raw.data, depth={1: (0, raw.overlap)})
     complex_data = data[..., 0] + np.complex64(1j)*data[..., 1]
     A = complex_data[..., 0]
     B = complex_data[..., 1]
@@ -216,9 +215,12 @@ def quantize(data, out_dtype=np.int8, autoscale=True):
         mant, expt = np.frexp(maxval)
         nbits = 8*np.dtype(out_dtype).itemsize
         split *= 2**(nbits-1-expt)
-    return (split).astype(out_dtype)
+    split = split.astype(out_dtype)
+    split = split.rechunk((-1, split.chunks[1], -1, -1))
+    return split
 
-def write(filename, data, samples_per_block=None, pktsize=8192, overlap=0, out_dtype=np.int8, autoscale=True, metadata=None, **kwargs):
+def write(filename, data, metadata=None, samples_per_block=None, overlap=12288,
+          pktsize=8192, out_dtype=np.int8, autoscale=True, **kwargs):
     """
     Write channelized data to a GUPPI raw file.
 
@@ -226,21 +228,33 @@ def write(filename, data, samples_per_block=None, pktsize=8192, overlap=0, out_d
     ----------
     filename: Name of file to write data to
     data: `ChannelizedData` object
-    samples_per_block: Number of samples write in each block
+    samples_per_block: Number of samples write in each block. If `None`, will
+             be determined automatically from the block structure of the data.
     pktsize: Number of bytes in a "packet". Usually not necessary to change.
     overlap: Number of overlap samples.
     out_dtype: Data type of output. Default is int8 (8 bits).
     autoscale: Whether to automatically scale the data to fit in the range of
               the output data type.
+    Additional keyword arguments are stored as header cards in the output file.
     """
     nbytes = np.dtype(out_dtype).itemsize
     nsamples = data.n_samples
-    if samples_per_block is None:
+    nchan = data.nchan
+    bytes_per_sample = nchan*2*2*nbytes
+    if not data.delayed:
+        A = da.from_array(data.A, name=False)
+        B = da.from_array(data.B, name=False)
+        data = ChannelizedData(
+            A, B, data.start_time, data.feed_poln, data.chan_bw, data.freqs
+        )
+    if samples_per_block is None and len(data.chunks) == 1:
         # write at least 2 blocks, otherwise DSPSR will have a hard time
-        samples_per_block = min(2**20, nsamples//2)
-    nblocks = int(np.ceil((nsamples - overlap)/samples_per_block))
+        samples_per_block = int(np.ceil(nsamples/2))
+    if samples_per_block is not None:
+        data = data.rechunk((-1, samples_per_block))
     if metadata is None:
         metadata = ObservingMetadata.default()
+    offset = data.t[0].offset.compute()
 
     header = GuppiRawHeader({
         'SRC_NAME': metadata.src_name,
@@ -250,12 +264,12 @@ def write(filename, data, samples_per_block=None, pktsize=8192, overlap=0, out_d
         'RA_STR': metadata.ra_str,
         'DEC_STR': metadata.dec_str,
         'OBSERVER': metadata.observer,
-        'OBSFREQ': f'{data.obsfreq/1e6:.16g}',
+        'OBSFREQ': f'{data.freqs[data.freqs.size//2]/1e6:.16g}',
         'OBSBW': f'{data.nchan*data.chan_bw/1e6:.16g}',
         'TBIN': f'{1/data.chan_bw:.16g}',
         'STT_IMJD': data.t.mjd,
-        'STT_SMJD': data.t.second + int(data.t[0].offset),
-        'STT_OFFS': data.t[0].offset - int(data.t[0].offset),
+        'STT_SMJD': data.t.second + int(offset),
+        'STT_OFFS': offset - int(offset),
         'PKTIDX': 0, # to be filled in later
         'PKTSIZE': pktsize,
         'PKTFMT': '1SFA',
@@ -264,7 +278,7 @@ def write(filename, data, samples_per_block=None, pktsize=8192, overlap=0, out_d
         'POL_TYPE': 'AABBCRCI',
         'FD_POLN': data.feed_poln,
         'NBITS': 8*nbytes,
-        'OBSNCHAN': f'{data.nchan}',
+        'OBSNCHAN': f'{nchan}',
         'BLOCSIZE': 0, # to be filled in later
         'OVERLAP': overlap,
     })
@@ -273,20 +287,20 @@ def write(filename, data, samples_per_block=None, pktsize=8192, overlap=0, out_d
         header[key.upper()[:8]] = value
 
     quantized_data = quantize(data, out_dtype, autoscale)
+    quantized_data = da.overlap.overlap(
+        quantized_data,
+        depth={1: (0, overlap)},
+        boundary=None
+    )
 
     with open(filename, 'wb') as fh:
-        for iblock in range(nblocks):
-            bytes_per_sample = data.nchan*2*2*nbytes
-            header['PKTIDX'] = iblock*samples_per_block*bytes_per_sample//pktsize
-            start = iblock*samples_per_block
-            end = (iblock + 1)*samples_per_block + overlap
-            if end > nsamples:
-                end = nsamples
-                newsize = (end - start)*bytes_per_sample
-                oldsize = (samples_per_block + overlap)*bytes_per_sample
-                warnings.warn(f"Last block has size {newsize}, not {oldsize}, bytes")
-            header['BLOCSIZE'] = (end - start)*bytes_per_sample
+        pktidx = 0
+        for iblock, block in enumerate(quantized_data.blocks.ravel()):
+            print(f"Writing block {iblock} with block size {block.size}")
+            header['PKTIDX'] = pktidx
+            header['BLOCSIZE'] = block.size*nbytes
+            pktidx += block.size*nbytes//pktsize
             for card in header.cards_as_bytes():
                 fh.write(card)
             fh.write(b"END" + b" "*77)
-            fh.write(quantized_data[:,start:end].tobytes())
+            fh.write(block.compute().tobytes())
