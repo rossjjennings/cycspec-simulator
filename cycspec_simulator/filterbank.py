@@ -52,7 +52,7 @@ def pfb(x, nchan, ntap, window="hamming", fs=1.0):
 
     return xpfb
 
-def channelize(data, nchan, ntap=24, window="hamming"):
+def channelize(data, nchan, ntap=24, window="hamming", rechunk=True):
     """
     Channelize a BasebandData object using a polyphase filterbank.
 
@@ -63,6 +63,8 @@ def channelize(data, nchan, ntap=24, window="hamming"):
     ntap: Number of polyphase fiterbank taps
     window: Window function used for polyphase filterbank
             (string interpreted by `scipy.signal.get_window()`)
+    rechunk: Whether to re-chunk the input arrays so that the
+             chunk size is a multiple of `nchan`.
 
     Returns
     -------
@@ -72,7 +74,10 @@ def channelize(data, nchan, ntap=24, window="hamming"):
     freqs += data.obsfreq
     start_time = data.t[nchan*(ntap - 1)]
     if data.delayed:
-        chunks = list(chunk//nchan for chunk in data.A.chunks[0])
+        if rechunk and any(chunk % nchan for chunk in data.chunks[0]):
+            new_chunk_size = int(np.ceil(max(data.chunks[0])/nchan))*nchan
+            data = data.rechunk(new_chunk_size)
+        chunks = list(chunk//nchan for chunk in data.chunks[0])
         chunks[0] -= ntap - 1
         chunks = ((nchan,), tuple(chunks))
         A_pfb = da.map_overlap(
@@ -158,6 +163,13 @@ class ChannelizedData:
         return self.A.shape[-1]
 
     @property
+    def chunks(self):
+        if self.delayed:
+            return self.A.chunks
+        else:
+            return tuple((n,) for n in self.A.shape)
+
+    @property
     def bandwidth(self):
         return self.nchan*self.chan_bw
 
@@ -171,12 +183,22 @@ class ChannelizedData:
     def delayed(self):
         return isinstance(self.A, da.Array)
 
-    def compute(self):
+    def compute(self, **kwargs):
         if self.delayed:
-            A = self.A.compute()
-            B = self.B.compute()
+            A = self.A.compute(**kwargs)
+            B = self.B.compute(**kwargs)
             return ChannelizedData(
                 A, B, self.start_time, self.feed_poln, self.chan_bw, self.freqs
+            )
+        else:
+            return self
+
+    def rechunk(self, chunks='auto', **kwargs):
+        if self.delayed:
+            A = self.A.rechunk(chunks=chunks, **kwargs)
+            B = self.B.rechunk(chunks=chunks, **kwargs)
+            return ChannelizedData(
+                A, B, self.start_time, self.feed_poln, self.chan_bw, self.freqs,
             )
         else:
             return self

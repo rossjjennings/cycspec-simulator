@@ -202,6 +202,13 @@ class BasebandData:
         return self.A.shape[-1]
 
     @property
+    def chunks(self):
+        if self.delayed:
+            return self.A.chunks
+        else:
+            return tuple((n,) for n in self.A.shape)
+
+    @property
     def t(self):
         sample_freq = np.abs(self.bandwidth)
         return get_time_axis(self.start_time, self.n_samples, sample_freq, self.delayed)
@@ -212,11 +219,24 @@ class BasebandData:
         sample_freq = np.abs(self.bandwidth)
         return n_samples/sample_freq
 
-    def compute(self):
+    def compute(self, **kwargs):
         if self.delayed:
             return BasebandData(
-                self.A.compute(),
-                self.B.compute(),
+                self.A.compute(**kwargs),
+                self.B.compute(**kwargs),
+                self.start_time,
+                self.feed_poln,
+                self.bandwidth,
+                self.obsfreq,
+            )
+        else:
+            return self
+
+    def rechunk(self, chunks='auto', **kwargs):
+        if self.delayed:
+            return BasebandData(
+                self.A.rechunk(chunks=chunks, **kwargs),
+                self.B.rechunk(chunks=chunks, **kwargs),
                 self.start_time,
                 self.feed_poln,
                 self.bandwidth,
