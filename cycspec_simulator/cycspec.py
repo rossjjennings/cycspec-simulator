@@ -223,7 +223,7 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
     if data.delayed:
         chunks, = data.A.chunks
         def linspace(*args, **kwargs):
-            return da.linspace(*args, chunks=2*chunks[0], **kwargs)
+            return da.linspace(*args, chunks=[2*chunk for chunk in chunks], **kwargs)
     else:
         linspace = np.linspace
     offset = linspace(0, t_span, 2*data.n_samples, endpoint=False)

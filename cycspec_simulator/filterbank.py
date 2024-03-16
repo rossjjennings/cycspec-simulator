@@ -1,5 +1,6 @@
 import numpy as np
 import numba as nb
+import dask.array as da
 from scipy import signal, fft
 
 from .baseband import BasebandData
@@ -47,6 +48,7 @@ def pfb(x, nchan, ntap, window="hamming", fs=1.0):
     # need scipy fft to avoid dtype promotion
     xpfb = fft.fft(xs, nchan, axis=1)
     xpfb *= np.sqrt(nchan)
+    xpfb = fft.fftshift(xpfb.T, axes=0)
 
     return xpfb
 
@@ -66,14 +68,29 @@ def channelize(data, nchan, ntap=24, window="hamming"):
     -------
     channelized_data: ChannelizedData object
     """
-    A_pfb = pfb(data.A, nchan=nchan, ntap=ntap, window=window, fs=data.bandwidth)
-    B_pfb = pfb(data.B, nchan=nchan, ntap=ntap, window=window, fs=data.bandwidth)
-    freqs = np.fft.fftshift(np.fft.fftfreq(nchan, d=1/data.bandwidth))
+    freqs = fft.fftshift(fft.fftfreq(nchan, d=1/data.bandwidth))
     freqs += data.obsfreq
-    A_pfb = np.fft.fftshift(A_pfb.T, axes=0)
-    B_pfb = np.fft.fftshift(B_pfb.T, axes=0)
+    start_time = data.t[nchan*(ntap - 1)]
+    if data.delayed:
+        chunks = list(chunk//nchan for chunk in data.A.chunks[0])
+        chunks[0] -= ntap - 1
+        chunks = ((nchan,), tuple(chunks))
+        A_pfb = da.map_overlap(
+            pfb, data.A, nchan=nchan, ntap=ntap, window=window, fs=data.bandwidth,
+            depth={0: (nchan*(ntap-1), 0)}, boundary=None, dtype=data.A.dtype,
+            chunks=chunks
+        )
+        B_pfb = da.map_overlap(
+            pfb, data.A, nchan=nchan, ntap=ntap, window=window, fs=data.bandwidth,
+            depth={0: (nchan*(ntap-1), 0)}, boundary=None, dtype=data.A.dtype,
+            chunks=chunks
+        )
+        start_time = start_time.compute()
+    else:
+        A_pfb = pfb(data.A, nchan=nchan, ntap=ntap, window=window, fs=data.bandwidth)
+        B_pfb = pfb(data.B, nchan=nchan, ntap=ntap, window=window, fs=data.bandwidth)
     return ChannelizedData(
-        A_pfb, B_pfb, start_time=data.start_time,
+        A_pfb, B_pfb, start_time=start_time,
         feed_poln=data.feed_poln,
         chan_bw=data.bandwidth/nchan, freqs=freqs,
     )
@@ -149,6 +166,20 @@ class ChannelizedData:
         n_samples = self.A.shape[-1]
         sample_freq = np.abs(self.chan_bw)
         return n_samples/sample_freq
+
+    @property
+    def delayed(self):
+        return isinstance(self.A, da.Array)
+
+    def compute(self):
+        if self.delayed:
+            A = self.A.compute()
+            B = self.B.compute()
+            return ChannelizedData(
+                A, B, self.start_time, self.feed_poln, self.chan_bw, self.freqs
+            )
+        else:
+            return self
 
     def extract_channel(self, ichan):
         return BasebandData(
