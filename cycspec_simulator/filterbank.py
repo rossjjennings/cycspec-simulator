@@ -1,5 +1,6 @@
 import numpy as np
 import numba as nb
+import dask
 import dask.array as da
 from scipy import signal, fft
 
@@ -7,6 +8,8 @@ from .baseband import BasebandData, DelayedRNG, get_time_axis
 from .interpolation import lerp
 from .time import Time
 from .cycspec import PeriodicSpectrum, cycfold_cpu
+from .folding import fold_channelized
+from .polarization import coherence_to_stokes
 from .cuda import have_cuda, cuda_failure
 if have_cuda:
     from .cycspec_gpu import cycfold_gpu
@@ -159,8 +162,11 @@ class ChannelizedModel:
 
         offset = t_start.offset - nlag/self.baseband_model.bandwidth
         t_start = Time(t_start.mjd, t_start.second, offset)
+        kwargs = {}
+        if delayed:
+            kwargs['chunks'] = chunks_baseband
         data = self.baseband_model.sample(
-            n_baseband, t_start, interp, dtype, rng=rng, chunks=chunks_baseband
+            n_baseband, t_start, interp, dtype, rng=rng, **kwargs
         )
         return channelize(data, self.nchan, self.ntap, self.window)
 
@@ -301,3 +307,32 @@ class ChannelizedData:
             U[sl] = pspec.U
             V[sl] = pspec.V
         return PeriodicSpectrum(freq, self.start_time, I, Q, U, V)
+
+    def fold(self, nbin, predictor):
+        phi = predictor.phase(self.t)
+        if self.delayed:
+            phi = phi.rechunk(chunks=self.A.chunks[1])
+            AA, BB, CR, CI = [], [], [], []
+            for phi_blk, A_blk, B_blk in zip(phi.blocks, self.A.blocks, self.B.blocks):
+                AA_blk, BB_blk, CR_blk, CI_blk = dask.delayed(fold_channelized, nout=4)(
+                    phi_blk, A_blk, B_blk, nbin
+                )
+                AA.append(da.from_delayed(AA_blk, (nbin,), dtype=self.A.real.dtype))
+                BB.append(da.from_delayed(BB_blk, (nbin,), dtype=self.A.real.dtype))
+                CR.append(da.from_delayed(CR_blk, (nbin,), dtype=self.A.real.dtype))
+                CI.append(da.from_delayed(CI_blk, (nbin,), dtype=self.A.real.dtype))
+            AA = da.mean(da.stack(AA), axis=0)
+            BB = da.mean(da.stack(BB), axis=0)
+            CR = da.mean(da.stack(CR), axis=0)
+            CI = da.mean(da.stack(CI), axis=0)
+            AA, BB, CR, CI = dask.compute(AA, BB, CR, CI)
+        else:
+            print(phi.shape, self.A.shape, self.B.shape, nbin)
+            phase = phi % 1
+            phase_bin = np.int64(np.round(phase*nbin)) % nbin
+            print(np.min(phase_bin), np.max(phase_bin))
+            AA, BB, CR, CI = fold_channelized(phi, self.A, self.B, nbin)
+        I, Q, U, V = coherence_to_stokes(
+            AA, BB, CR, CI, self.feed_poln
+        )
+        return PeriodicSpectrum(self.freqs, self.start_time, I, Q, U, V)

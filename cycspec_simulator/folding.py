@@ -24,19 +24,19 @@ def fold_numba(phi, A, B, nbin):
     CI /= samples
     return AA, BB, CR, CI
 
-@nb.njit
+@nb.njit(parallel=True)
 def fold_channelized(phi, A, B, nbin):
     nchan = A.shape[0]
-    AA = np.zeros((nchan, nbin), dtype=real_dtype)
-    BB = np.zeros((nchan, nbin), dtype=real_dtype)
-    CR = np.zeros((nchan, nbin), dtype=real_dtype)
-    CI = np.zeros((nchan, nbin), dtype=real_dtype)
+    AA = np.zeros((nchan, nbin), dtype=A.real.dtype)
+    BB = np.zeros((nchan, nbin), dtype=A.real.dtype)
+    CR = np.zeros((nchan, nbin), dtype=A.real.dtype)
+    CI = np.zeros((nchan, nbin), dtype=A.real.dtype)
     samples = np.zeros((nchan, nbin), dtype=np.int64)
     for ichan in nb.prange(nchan):
         for i in range(phi.size):
             phase = phi[i] % 1
             phase_bin = np.int64(np.round(phase*nbin)) % nbin
-            samples[phase_bin] += 1
+            samples[ichan, phase_bin] += 1
             AA[ichan, phase_bin] += (A[ichan, i]*A[ichan, i].conjugate()).real
             BB[ichan, phase_bin] += (B[ichan, i]*B[ichan, i].conjugate()).real
             CR[ichan, phase_bin] += (A[ichan, i]*B[ichan, i].conjugate()).real
