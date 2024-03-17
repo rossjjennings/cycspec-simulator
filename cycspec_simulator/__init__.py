@@ -5,7 +5,6 @@ from .scattering import ExponentialScatteringModel
 from .dispersion import DispersionFilter
 from .interpolation import fft_roll, fft_interp, lerp
 from .cycspec import cycfold_cpu
-from .folding import fold
 from .time import Time
 from .metadata import ObservingMetadata
 from .filterbank import channelize, ChannelizedModel
