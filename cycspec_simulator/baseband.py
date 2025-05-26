@@ -118,10 +118,11 @@ class BasebandModel:
                 chunk_sizes[0] += filtr.nlag_pos
                 chunk_sizes[-1] += filtr.nlag_neg
             chunks = (tuple(chunk_sizes),)
+            print(f"altered chunks: {chunks}")
         for filtr in self.filters:
             n_samples += filtr.nlag_pos + filtr.nlag_neg
 
-        t = get_time_axis(t_start, n_samples, self.bandwidth, delayed=delayed)
+        t = get_time_axis(t_start, n_samples, self.bandwidth, delayed=delayed, chunks=chunks)
         phase = self.predictor.phase(t) - int(self.predictor.phase(t_start))
         binno = (phase*self.template.nbin).astype(dtype)
         I = interp(self.template.I, binno)
@@ -150,6 +151,7 @@ class BasebandModel:
         data = BasebandData(A, B, t_start, self.feed_poln, self.bandwidth, self.obsfreq)
         for filtr in self.filters:
             data = filtr.apply(data)
+        print(f"chunks after apply filters: {data.A.chunks}")
 
         if delayed:
             chunks=data.A.chunks
@@ -176,16 +178,16 @@ class BasebandModel:
         n_samples = np.int64(duration*self.bandwidth)
         return sample(n_samples, phase_start, interp)
 
-def get_time_axis(start_time, n_samples, bandwidth, delayed=False):
-    if delayed:
-        linspace = da.linspace
-    else:
-        linspace = np.linspace
+def get_time_axis(start_time, n_samples, bandwidth, delayed=False, chunks="auto"):
     t_span = n_samples/bandwidth
+    if delayed:
+        sample_offsets = da.linspace(0, t_span, n_samples, endpoint=False, chunks=chunks)
+    else:
+        sample_offsets = np.linspace(0, t_span, n_samples, endpoint=False)
     return Time(
         start_time.mjd,
         start_time.second,
-        start_time.offset + linspace(0, t_span, n_samples, endpoint=False),
+        start_time.offset + sample_offsets,
     )
 
 class BasebandData:
