@@ -1,5 +1,5 @@
 import sys
-from cuda.cuda import (
+from cuda.bindings.driver import (
     CUresult,
     CUdevice_attribute,
     cuInit,
