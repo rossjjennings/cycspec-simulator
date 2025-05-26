@@ -4,6 +4,7 @@ import dask
 import dask.array as da
 import matplotlib.pyplot as plt
 import time
+from loguru import logger
 
 from .interpolation import fft_roll
 from .polarization import validate_stokes, coherence_to_stokes
@@ -215,7 +216,7 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
           available CPUs, as detected by Numba.
     """
     complex_dtype = data.A.dtype
-    print(f"Input dtype: {complex_dtype}")
+    logger.debug(f"Input dtype: {complex_dtype}")
     nlag = ncyc//2 + 1
 
     # construct the bin plan
@@ -261,18 +262,18 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
         AA, BB, CR, CI, samples, elapsed = dask.compute(
             AA, BB, CR, CI, samples, elapsed, num_workers=n_workers,
         )
-        print(f"Total products accumulated: {4*np.sum(samples)}")
-        print(f"Elapsed time in numba: {elapsed:g} ms")
+        logger.info(f"Total products accumulated: {4*np.sum(samples)}")
+        logger.info(f"Elapsed time in numba: {elapsed:g} ms")
         throughput = 4*np.sum(samples)/(elapsed/1000)
-        print(f"Throughput: {throughput:g} products/sec.")
+        logger.info(f"Throughput: {throughput:g} products/sec.")
     else:
         AA, BB, CR, CI, samples, elapsed = corrfold_cpu(
             data.A, data.B, nlag, nbin, binplan, include_end
         )
-        print(f"Total products accumulated: {4*np.sum(samples)}")
-        print(f"Elapsed time: {elapsed:g} ms")
+        logger.info(f"Total products accumulated: {4*np.sum(samples)}")
+        logger.info(f"Elapsed time: {elapsed:g} ms")
         throughput = 4*np.sum(samples)/(elapsed/1000)
-        print(f"Throughput: {throughput:g} products/sec.")
+        logger.info(f"Throughput: {throughput:g} products/sec.")
     pspec_AA = np.fft.fftshift(np.fft.hfft(AA, axis=0), axes=0)
     pspec_BB = np.fft.fftshift(np.fft.hfft(BB, axis=0), axes=0)
     pspec_CR = np.fft.fftshift(np.fft.hfft(CR, axis=0), axes=0)

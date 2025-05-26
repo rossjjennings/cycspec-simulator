@@ -6,6 +6,7 @@ import dask.array as da
 import os
 import numbers
 import warnings
+from loguru import logger
 
 from .metadata import ObservingMetadata
 from .baseband import BasebandData
@@ -53,11 +54,13 @@ class GuppiRawHeader:
                 card_bytes = fh.read(80)
                 card = card_bytes.decode('ascii')
             except UnicodeDecodeError:
-                print(f"current position: {fh.tell()}")
-                print(f"card bytes: {card_bytes}")
+                logger.error(f"Encountered non-ASCII value in header card")
+                logger.debug(f"current position: {fh.tell()}")
+                logger.debug(f"card bytes: {card_bytes}")
                 raise
             if len(card) < 80:
-                raise EOFError("Reached end of file")
+                logger.error(f"Encountered EOF while reading header")
+                raise EOFError("Unexpected EOF while reading header")
             if card.startswith("END"):
                 break
             key, value = card.split("=")

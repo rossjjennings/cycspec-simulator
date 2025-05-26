@@ -3,6 +3,7 @@ import numba as nb
 import dask
 import dask.array as da
 from abc import ABCMeta, abstractmethod
+from loguru import logger
 
 from .interpolation import fft_interp, lerp
 from .template_profile import TemplateProfile
@@ -118,7 +119,7 @@ class BasebandModel:
                 chunk_sizes[0] += filtr.nlag_pos
                 chunk_sizes[-1] += filtr.nlag_neg
             chunks = (tuple(chunk_sizes),)
-            print(f"altered chunks: {chunks}")
+            logger.debug(f"altered chunks: {chunks}")
         for filtr in self.filters:
             n_samples += filtr.nlag_pos + filtr.nlag_neg
 
@@ -151,7 +152,7 @@ class BasebandModel:
         data = BasebandData(A, B, t_start, self.feed_poln, self.bandwidth, self.obsfreq)
         for filtr in self.filters:
             data = filtr.apply(data)
-        print(f"chunks after apply filters: {data.A.chunks}")
+        logger.debug(f"chunks after apply filters: {data.A.chunks}")
 
         if delayed:
             chunks=data.A.chunks

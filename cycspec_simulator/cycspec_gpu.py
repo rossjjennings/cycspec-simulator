@@ -4,6 +4,7 @@ from numba import cuda
 import dask
 import dask.array as da
 import cupy
+from loguru import logger
 
 from .polarization import coherence_to_stokes
 from .time import Time
@@ -192,7 +193,7 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=
     include_end: Passed along to corrfold_gpu(), see there for details.
     """
     complex_dtype = data.A.dtype
-    print(f"Input dtype: {complex_dtype}")
+    logger.debug(f"Input dtype: {complex_dtype}")
     nlag = ncyc//2 + 1
 
     # construct the bin plan
@@ -239,18 +240,18 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=
         AA, BB, CR, CI, samples, elapsed = dask.compute(
             AA, BB, CR, CI, samples, elapsed, num_workers=n_workers
         )
-        print(f"Total products accumulated: {4*np.sum(samples)}")
-        print(f"Elapsed time in kernel: {elapsed:g} ms")
+        logger.info(f"Total products accumulated: {4*np.sum(samples)}")
+        logger.info(f"Elapsed time in kernel: {elapsed:g} ms")
         throughput = 4*np.sum(samples)/(elapsed/1000)
-        print(f"Throughput: {throughput:g} products/sec.")
+        logger.info(f"Throughput: {throughput:g} products/sec.")
     else:
         AA, BB, CR, CI, samples, elapsed = corrfold_gpu(
             data.A, data.B, nlag, nbin, binplan, stream, include_end
         )
-        print(f"Elapsed time: {elapsed:g} ms")
-        print(f"Total products accumulated: {4*np.sum(samples)}")
+        logger.info(f"Elapsed time: {elapsed:g} ms")
+        logger.info(f"Total products accumulated: {4*np.sum(samples)}")
         throughput = 4*np.sum(samples)/(elapsed/1000)
-        print(f"Throughput: {throughput:g} products/sec.")
+        logger.info(f"Throughput: {throughput:g} products/sec.")
     cuda.profile_stop()
 
     pspec_AA = np.fft.fftshift(np.fft.hfft(AA.get(), axis=0), axes=0)

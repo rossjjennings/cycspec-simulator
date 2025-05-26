@@ -1,3 +1,4 @@
+import cycspec_simulator.logging
 from .template_profile import TemplateProfile
 from .baseband import BasebandModel, BasebandData
 from .phase_predictor import FreqOnlyPredictor, PolynomialPredictor

@@ -3,6 +3,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import scipy.signal
 from astropy.io import fits
+from loguru import logger
 
 from .interpolation import fft_roll
 from .polarization import validate_stokes, coherence_to_stokes
@@ -95,7 +96,7 @@ class TemplateProfile:
                       the phase where it is minimized.
         """
         adjustment = max(-np.min(self.squared_norm), 0.0)
-        print(f"Adjusting I**2 by {adjustment}")
+        logger.info(f"Adjusting I**2 by {adjustment}")
         adjustment *= fudge_factor
         self.I = np.sqrt(self.I**2 + adjustment)
 

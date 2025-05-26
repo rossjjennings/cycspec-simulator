@@ -16,6 +16,7 @@ dependencies = [
     "astropy>=4.0.4",
     "numba>=0.57.0", # needed to compile multiple signatures for GPU
     "dask>=2023.2.1", # needed for dask.array.random.default_rng()
+    "loguru",
 ]
 
 [project.optional-dependencies]

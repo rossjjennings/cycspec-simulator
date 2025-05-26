@@ -3,6 +3,7 @@ import numba as nb
 import dask
 import dask.array as da
 from scipy import signal, fft
+from loguru import logger
 
 from .baseband import BasebandData, DelayedRNG, get_time_axis
 from .interpolation import lerp
@@ -292,11 +293,11 @@ class ChannelizedData:
             V[bot] = pspec.V[ncyc//2:]
             start = 1
             offs = -ncyc//2
-            print("Even case")
+            logger.info("Even case")
         else:
             start = 0
             offs = 0
-            print("Odd case")
+            logger.info("Odd case")
         for ichan in range(start, self.nchan):
             chan_data = self.extract_channel(ichan)
             pspec = cycfold(chan_data, ncyc, nbin, predictor, **cycfold_kwargs)
@@ -327,10 +328,20 @@ class ChannelizedData:
             CI = da.mean(da.stack(CI), axis=0)
             AA, BB, CR, CI = dask.compute(AA, BB, CR, CI)
         else:
-            print(phi.shape, self.A.shape, self.B.shape, nbin)
+            logger.debug(
+                "phi.shape: {}, A.shape: {}, B.shape: {}, nbin: {}",
+                phi.shape,
+                self.A.shape,
+                self.B.shape,
+                nbin
+            )
             phase = phi % 1
             phase_bin = np.int64(np.round(phase*nbin)) % nbin
-            print(np.min(phase_bin), np.max(phase_bin))
+            logger.debug(
+                "max phase bin: {}, min phase_bin: {}",
+                np.min(phase_bin),
+                np.max(phase_bin),
+            )
             AA, BB, CR, CI = fold_channelized(phi, self.A, self.B, nbin)
         I, Q, U, V = coherence_to_stokes(
             AA, BB, CR, CI, self.feed_poln
