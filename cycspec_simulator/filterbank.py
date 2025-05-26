@@ -11,7 +11,7 @@ from .time import Time
 from .cycspec import PeriodicSpectrum, cycfold_cpu
 from .folding import fold_channelized
 from .polarization import coherence_to_stokes
-from .cuda import have_cuda, cuda_failure
+from .gpu import have_cuda, cuda_failure
 if have_cuda:
     from .cycspec_gpu import cycfold_gpu
 
