@@ -39,13 +39,14 @@ if hasattr(da.random, 'Generator'):
     DelayedRNG.register(da.random.Generator)
 
 def complex_white_noise(shape, rng, dtype, chunks=-1):
-    kwargs = {'size': shape, 'dtype': dtype}
+    real_dtype = np.array(0).astype(dtype).real.dtype
+    kwargs = {'size': shape, 'dtype': real_dtype}
     if isinstance(rng, DelayedRNG):
         kwargs['chunks'] = chunks
 
     real = rng.standard_normal(**kwargs)
     imag = rng.standard_normal(**kwargs)
-    return (real + 1j*imag)/np.sqrt(2)
+    return (real + 1j*imag)/np.sqrt(2).astype(dtype)
 
 class BasebandModel:
     def __init__(self, template, predictor, bandwidth, filters=None,
@@ -84,7 +85,7 @@ class BasebandModel:
         """
         self.filters.append(filtr)
 
-    def sample(self, n_samples, t_start=None, interp=lerp, dtype=np.float32,
+    def sample(self, n_samples, t_start=None, interp=lerp, dtype=np.complex64,
                rng=None, chunks='auto'):
         """
         Simulate a given number of samples from the modeled baseband time series.
@@ -106,26 +107,28 @@ class BasebandModel:
         """
         if t_start is None:
             t_start = self.predictor.epoch
-        dtype = np.dtype(dtype)
+        dtype = np.result_type(dtype, 1j)
+        real_dtype = np.array(0).astype(dtype).real.dtype
+        logger.debug("requested dtype: {}", dtype)
         if rng is None:
             rng = np.random.default_rng()
 
         delayed = isinstance(rng, DelayedRNG)
         if delayed:
-            chunk_sizes = list(
-                da.core.normalize_chunks(chunks, shape=(n_samples,), dtype=dtype)[0]
-            )
+            chunks = da.core.normalize_chunks(chunks, shape=(n_samples, 2), dtype=dtype)
+            logger.debug("proposed chunks: {}", chunks)
+            chunk_sizes = list(chunks[0])
             for filtr in self.filters:
                 chunk_sizes[0] += filtr.nlag_pos
                 chunk_sizes[-1] += filtr.nlag_neg
             chunks = (tuple(chunk_sizes),)
-            logger.debug(f"altered chunks: {chunks}")
+            logger.debug("altered chunks: {}", chunks)
         for filtr in self.filters:
             n_samples += filtr.nlag_pos + filtr.nlag_neg
 
         t = get_time_axis(t_start, n_samples, self.bandwidth, delayed=delayed, chunks=chunks)
         phase = self.predictor.phase(t) - int(self.predictor.phase(t_start))
-        binno = (phase*self.template.nbin).astype(dtype)
+        binno = (phase*self.template.nbin).astype(real_dtype)
         I = interp(self.template.I, binno)
         noise1 = complex_white_noise(n_samples, rng, dtype, chunks)
         noise2 = complex_white_noise(n_samples, rng, dtype, chunks)
@@ -148,18 +151,20 @@ class BasebandModel:
         else:
             A = np.sqrt(I/2)*noise1
             B = np.sqrt(I/2)*noise2
+        logger.debug("dtype before filtering: {}", noise1.dtype)
 
         data = BasebandData(A, B, t_start, self.feed_poln, self.bandwidth, self.obsfreq)
         for filtr in self.filters:
             data = filtr.apply(data)
-        logger.debug(f"chunks after apply filters: {data.A.chunks}")
+        logger.debug("dtype after filtering: {}", noise1.dtype)
+        logger.debug("chunks after filtering: {}", data.A.chunks)
 
         if delayed:
             chunks=data.A.chunks
         noise3 = complex_white_noise(data.n_samples, rng, dtype, chunks=chunks)
         noise4 = complex_white_noise(data.n_samples, rng, dtype, chunks=chunks)
-        data.A += np.sqrt(np.float32(self.noise_level)/2)*noise3
-        data.B += np.sqrt(np.float32(self.noise_level)/2)*noise4
+        data.A += np.sqrt((self.noise_level)/2).astype(real_dtype)*noise3
+        data.B += np.sqrt((self.noise_level)/2).astype(real_dtype)*noise4
 
         return data
 
