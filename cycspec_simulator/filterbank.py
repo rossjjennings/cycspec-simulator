@@ -79,7 +79,7 @@ def channelize(data, nchan, ntap=24, window="hamming", rechunk=True):
     """
     freqs = fft.fftshift(fft.fftfreq(nchan, d=1/data.bandwidth))
     freqs += data.obsfreq
-    start_time = data.t[nchan*(ntap - 1)]
+    start_time = data.t[nchan*ntap//2]
     if data.delayed:
         if rechunk and any(chunk % nchan for chunk in data.chunks[0]):
             new_chunk_size = int(np.ceil(max(data.chunks[0])/nchan))*nchan
