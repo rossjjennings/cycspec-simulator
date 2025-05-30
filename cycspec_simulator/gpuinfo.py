@@ -17,6 +17,7 @@ try:
         amdsmi_init,
         amdsmi_get_processor_handles,
         amdsmi_get_clk_freq,
+        amdsmi_get_clock_info,
         amdsmi_get_gpu_asic_info,
         amdsmi_get_gpu_memory_total,
         amdsmi_get_gpu_subsystem_name,
@@ -124,9 +125,9 @@ def print_amd_gpu_info(handle):
     if 'target_graphics_version' in asic_info:
         print(f"  Graphics version: {asic_info['target_graphics_version']}")
     print(f"  Total device memory: {device_total_mem/2**30:g} GiB")
-    print(f"  Device memory speed: {memory_speed_gbps/1e6:g} Gb/s")
+    print(f"  Device memory speed: {memory_speed_gbps/1e3:g} Gb/s")
     print(f"  Device memory bus width: {bus_width} bits")
-    print(f"  Device memory bandwidth: {memory_bandwidth/1e6:g} GB/s")
+    print(f"  Device memory bandwidth: {memory_bandwidth/1e3:g} GB/s")
     print(f"  Maximum clock speed: {sys_clock_info['max_clk']/1e3:g} GHz")
     if 'num_compute_units' in asic_info:
         print(f"  Number of multiprocessors: {asic_info['num_compute_units']}")
