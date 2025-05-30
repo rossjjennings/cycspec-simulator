@@ -27,7 +27,7 @@ cuda = [
 
 [project.scripts]
 cycspec-make-raw = "cycspec_simulator.make_raw:main"
-cycspec-gpuinfo = "cycspec_simulator.gpuinfo:print_device_info"
+cycspec-gpuinfo = "cycspec_simulator.gpuinfo:find_gpus"
 
 [tool.versioneer]
 VCS = "git"
