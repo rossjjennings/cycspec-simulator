@@ -90,8 +90,6 @@ def print_nvidia_gpu_info(device_id):
     max_total_threads = max_threads_per_smp*n_smp
     max_sharedmem_per_block = get_cuda_attribute('MAX_SHARED_MEMORY_PER_BLOCK', device_id)
     max_sharedmem_per_smp = get_cuda_attribute('MAX_SHARED_MEMORY_PER_MULTIPROCESSOR', device_id)
-    print()
-    print(f"Device {device_id}:")
     print(f"  Name: {device_name}")
     print(f"  Compute capability: {cc_major}.{cc_minor}")
     print(f"  Total device memory: {device_total_mem/2**30:g} GiB")
@@ -117,13 +115,19 @@ def print_amd_gpu_info(handle):
     device_total_mem = amdsmi_get_gpu_memory_total(handle, AmdSmiMemoryType.VRAM)
     asic_info = amdsmi_get_gpu_asic_info(handle)
     vram_info = amdsmi_get_gpu_vram_info(handle)
-    clk_freq_info = amdsmi_get_clk_freq(handle, AmdSmiClkType.DF)
+    sys_clock_info = amdsmi_get_clock_info(handle, AmdSmiClkType.SYS)
+    mem_clock_info = amdsmi_get_clock_info(handle, AmdSmiClkType.MEM)
+    bus_width = vram_info['vram_bit_width']
+    memory_speed_gbps = 8 * 2 * mem_clock_info['max_clk'] # DDR, 8 transfers/cycle
+    memory_bandwidth = memory_speed_gbps * bus_width / 8 # bits -> bytes
     print(f"  Name: {device_name}")
     if 'target_graphics_version' in asic_info:
         print(f"  Graphics version: {asic_info['target_graphics_version']}")
     print(f"  Total device memory: {device_total_mem/2**30:g} GiB")
-    print(f"  Device memory bus width: {vram_info['vram_bit_width']} bits")
-    print(f"  Maximum clock speed: {clk_freq_info['frequency'][-1]/1e9:g} GHz")
+    print(f"  Device memory speed: {memory_speed_gbps/1e6:g} Gb/s")
+    print(f"  Device memory bus width: {bus_width} bits")
+    print(f"  Device memory bandwidth: {memory_bandwidth/1e6:g} GB/s")
+    print(f"  Maximum clock speed: {sys_clock_info['max_clk']/1e3:g} GHz")
     if 'num_compute_units' in asic_info:
         print(f"  Number of multiprocessors: {asic_info['num_compute_units']}")
 
