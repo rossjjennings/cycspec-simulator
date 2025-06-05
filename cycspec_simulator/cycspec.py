@@ -88,38 +88,7 @@ class NumbaThreads:
     def __exit__(self, type, value, traceback):
         nb.set_num_threads(self.n_threads_old)
 
-signatures = [
-    nb.types.Tuple((
-        nb.complex64[:,:],
-        nb.complex64[:,:],
-        nb.complex64[:,:],
-        nb.complex64[:,:],
-        nb.int64[:,:]
-    ))(
-        nb.complex64[:],
-        nb.complex64[:],
-        nb.int64,
-        nb.int64,
-        nb.int64[:],
-        nb.boolean,
-    ),
-    nb.types.Tuple((
-        nb.complex128[:,:],
-        nb.complex128[:,:],
-        nb.complex128[:,:],
-        nb.complex128[:,:],
-        nb.int64[:,:]
-    ))(
-        nb.complex128[:],
-        nb.complex128[:],
-        nb.int64,
-        nb.int64,
-        nb.int64[:],
-        nb.boolean,
-    ),
-]
-
-@nb.njit(signatures, parallel=True)
+@nb.njit(parallel=True)
 def corrfold_numba(A, B, nlag, nbin, binplan, include_end=False):
     """
     Compute the cyclic autocorrelation function from sampled data.

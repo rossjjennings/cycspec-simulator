@@ -32,42 +32,7 @@ class CUDATimer:
         self.event_end.synchronize()
         self.elapsed = self.event_begin.elapsed_time(self.event_end)
 
-signatures = [
-    (
-        nb.complex64[::1],
-        nb.complex64[::1],
-        nb.int64,
-        nb.int64[::1],
-        nb.int32[::1],
-        nb.float32[::1],
-        nb.float32[::1],
-        nb.float32[::1],
-        nb.float32[::1],
-        nb.float32[::1],
-        nb.float32[::1],
-        nb.float32[::1],
-        nb.float32[::1],
-        nb.boolean,
-    ),
-    (
-        nb.complex128[::1],
-        nb.complex128[::1],
-        nb.int64,
-        nb.int64[::1],
-        nb.int32[::1],
-        nb.float64[::1],
-        nb.float64[::1],
-        nb.float64[::1],
-        nb.float64[::1],
-        nb.float64[::1],
-        nb.float64[::1],
-        nb.float64[::1],
-        nb.float64[::1],
-        nb.boolean,
-    ),
-]
-
-@cuda.jit(signatures)
+@cuda.jit()
 def corrfold_kernel(A, B, nbin, binplan, n_samples,
                     AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag,
                     include_end=False):
