@@ -13,21 +13,18 @@ try:
 except ModuleNotFoundError:
     have_cuda = False
 try:
-    from amdsmi import (
-        amdsmi_init,
-        amdsmi_get_processor_handles,
-        amdsmi_get_clk_freq,
-        amdsmi_get_clock_info,
-        amdsmi_get_gpu_asic_info,
-        amdsmi_get_gpu_memory_total,
-        amdsmi_get_gpu_subsystem_name,
-        amdsmi_get_gpu_vram_info,
-        AmdSmiClkType,
-        AmdSmiMemoryType,
+    from hip.hip import (
+        hipError_t,
+        hipDeviceAttribute_t,
+        hipInit,
+        hipGetDeviceCount,
+        hipDeviceGetName,
+        hipDeviceTotalMem,
+        hipDeviceGetAttribute,
     )
-    have_amdsmi = True
+    have_hip = True
 except ModuleNotFoundError:
-    have_amdsmi = False
+    have_hip = False
 
 class CudaError(Exception):
     def __init__(self, err):
@@ -107,30 +104,82 @@ def print_nvidia_gpu_info(device_id):
     print(f"  Max. shared memory per block: {max_sharedmem_per_block/1024:g} kiB")
     print(f"  Max. shared memory per multiprocessor: {max_sharedmem_per_smp/1024:g} kiB")
 
-def find_amd_gpus():
-    amdsmi_init()
-    return amdsmi_get_processor_handles()
+class HipError(Exception):
+    def __init__(self, err):
+        message = err.name.removeprefix('hipError')
+        super().__init__(message)
+        self.message = message
 
-def print_amd_gpu_info(handle):
-    device_name = amdsmi_get_gpu_subsystem_name(handle)
-    device_total_mem = amdsmi_get_gpu_memory_total(handle, AmdSmiMemoryType.VRAM)
-    asic_info = amdsmi_get_gpu_asic_info(handle)
-    vram_info = amdsmi_get_gpu_vram_info(handle)
-    sys_clock_info = amdsmi_get_clock_info(handle, AmdSmiClkType.SYS)
-    mem_clock_info = amdsmi_get_clock_info(handle, AmdSmiClkType.MEM)
-    bus_width = vram_info['vram_bit_width']
-    memory_speed_gbps = 8 * 2 * mem_clock_info['max_clk'] # DDR, 8 transfers/cycle
+def get_hip_attribute(attr_name, device_id):
+    attr_id = getattr(hipDeviceAttribute_t, f'hipDeviceAttribute{attr_name}')
+    err, attr = hipDeviceGetAttribute(attr_id, device_id)
+    if err:
+        raise HipError(err)
+    else:
+        return attr
+
+def find_amd_gpus():
+    try:
+        err, = hipInit(0)
+    except RuntimeError as e:
+        print(f"Could not locate HIP libraries ({e}).")
+        return 0
+    if err:
+        if err.name == 'hipErrorNoDevice':
+            print(f"No ROCm devices found")
+            return 0
+        else:
+            raise HipError(err)
+    err, device_count = hipGetDeviceCount()
+    if err:
+        raise HipError(err)
+
+    return device_count
+
+def print_amd_gpu_info(device_id):
+    has_maxblocks = True
+    err, device_name = hipDeviceGetName(128, device_id)
+    if err:
+        raise HipError(err)
+    device_name = str(device_name)
+    err, device_total_mem = hipDeviceTotalMem(device_id)
+    if err:
+        raise HipError(err)
+    clock_rate = get_hip_attribute('ClockRate', device_id)
+    memory_clock_rate = get_hip_attribute('MemoryClockRate', device_id)
+    memory_speed_gbps = 8 * 2 * memory_clock_rate # double data rate, 8 transfers/cycle
+    bus_width = get_hip_attribute('MemoryBusWidth', device_id)
     memory_bandwidth = memory_speed_gbps * bus_width / 8 # bits -> bytes
+    gfx_major = get_hip_attribute('ComputeCapabilityMajor', device_id)
+    gfx_minor = get_hip_attribute('ComputeCapabilityMinor', device_id)
+    n_wgp = get_hip_attribute('MultiprocessorCount', device_id)
+    try:
+        max_blocks_per_wgp = get_hip_attribute('MaxBlocksPerMultiProcessor', device_id)
+    except CudaError as error:
+        if error.message == 'InvalidValue':
+            has_maxblocks = False
+        else:
+            raise
+    max_threads_per_block = get_hip_attribute('MaxThreadsPerBlock', device_id)
+    max_threads_per_wgp = get_hip_attribute('MaxThreadsPerMultiProcessor', device_id)
+    max_total_threads = max_threads_per_wgp*n_wgp
+    max_sharedmem_per_block = get_hip_attribute('MaxSharedMemoryPerBlock', device_id)
+    max_sharedmem_per_wgp = get_hip_attribute('MaxSharedMemoryPerMultiprocessor', device_id)
     print(f"  Name: {device_name}")
-    if 'target_graphics_version' in asic_info:
-        print(f"  Graphics version: {asic_info['target_graphics_version']}")
+    print(f"  GFX version: {gfx_major}.{gfx_minor}")
     print(f"  Total device memory: {device_total_mem/2**30:g} GiB")
-    print(f"  Device memory speed: {memory_speed_gbps/1e3:g} Gb/s")
+    print(f"  Device memory speed: {memory_speed_gbps/1e6:g} Gb/s")
     print(f"  Device memory bus width: {bus_width} bits")
-    print(f"  Device memory bandwidth: {memory_bandwidth/1e3:g} GB/s")
-    print(f"  Maximum clock speed: {sys_clock_info['max_clk']/1e3:g} GHz")
-    if 'num_compute_units' in asic_info:
-        print(f"  Number of multiprocessors: {asic_info['num_compute_units']}")
+    print(f"  Device memory bandwidth: {memory_bandwidth/1e6:g} GB/s")
+    print(f"  Maximum clock speed: {clock_rate/1e6:g} GHz")
+    print(f"  Number of multiprocessors: {n_wgp}")
+    print(f"  Max. threads per block: {max_threads_per_block}")
+    print(f"  Max. threads per multiprocessor: {max_threads_per_wgp}")
+    if has_maxblocks:
+        print(f"  Max. blocks per multiprocessor: {max_blocks_per_wgp}")
+    print(f"  Max. total in-flight threads: {max_total_threads}")
+    print(f"  Max. shared memory per block: {max_sharedmem_per_block/1024:g} kiB")
+    print(f"  Max. shared memory per multiprocessor: {max_sharedmem_per_wgp/1024:g} kiB")
 
 def find_gpus():
     if have_cuda:
@@ -144,15 +193,14 @@ def find_gpus():
     else:
         nvidia_count = 0
 
-    if have_amdsmi:
-        amd_handles = find_amd_gpus()
-        amd_count = len(amd_handles)
+    if have_hip:
+        amd_count = find_amd_gpus()
         print(f"Found {amd_count} ROCm device" + ("s" if amd_count != 1 else "") + ".")
         if amd_count >= 0:
-            for i, handle in enumerate(amd_handles):
+            for device_id in range(amd_count):
                 print()
-                print(f"Device {i}:")
-                print_amd_gpu_info(handle)
+                print(f"Device {device_id}:")
+                print_amd_gpu_info(device_id)
     else:
         amd_count = 0
 
