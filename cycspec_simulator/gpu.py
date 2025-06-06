@@ -32,10 +32,10 @@ if have_hip:
     from numba import hip
 
 def get_current_device():
-    if have_cuda:
-        return CUDADevice(cuda.get_current_device().id)
-    elif have_hip:
+    if have_hip:
         return ROCmDevice(hip.get_current_device().id)
+    elif have_cuda:
+        return CUDADevice(cuda.get_current_device().id)
     else:
         return None
 
@@ -70,15 +70,6 @@ def get_devices():
     return devices
 
 def print_devices():
-    if have_cuda:
-        cuda_devices = get_cuda_devices()
-        n_cuda = len(cuda_devices)
-        print(f"Found {n_cuda} CUDA device{'s' if n_cuda != 1 else ''}.")
-        for device in cuda_devices:
-            print()
-            print(device.get_description())
-    if have_cuda and have_hip:
-        print()
     if have_hip:
         rocm_devices = get_rocm_devices()
         n_rocm = len(rocm_devices)
@@ -86,7 +77,13 @@ def print_devices():
         for device in cuda_devices:
             print()
             print(device.get_description())
-
+    elif have_cuda:
+        cuda_devices = get_cuda_devices()
+        n_cuda = len(cuda_devices)
+        print(f"Found {n_cuda} CUDA device{'s' if n_cuda != 1 else ''}.")
+        for device in cuda_devices:
+            print()
+            print(device.get_description())
 
 class CUDAError(Exception):
     """
