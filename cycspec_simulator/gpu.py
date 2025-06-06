@@ -63,10 +63,10 @@ def get_rocm_devices():
 
 def get_devices():
     devices = []
-    if have_cuda:
-        devices.extend(get_cuda_devices())
     if have_hip:
         devices.extend(get_rocm_devices())
+    elif have_cuda:
+        devices.extend(get_cuda_devices())
     return devices
 
 def print_devices():
@@ -74,7 +74,7 @@ def print_devices():
         rocm_devices = get_rocm_devices()
         n_rocm = len(rocm_devices)
         print(f"Found {n_rocm} ROCm device{'s' if n_rocm != 1 else ''}.")
-        for device in cuda_devices:
+        for device in rocm_devices:
             print()
             print(device.get_description())
     elif have_cuda:
