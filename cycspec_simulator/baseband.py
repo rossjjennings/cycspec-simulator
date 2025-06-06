@@ -157,7 +157,8 @@ class BasebandModel:
         for filtr in self.filters:
             data = filtr.apply(data)
         logger.debug("dtype after filtering: {}", noise1.dtype)
-        logger.debug("chunks after filtering: {}", data.A.chunks)
+        if delayed:
+            logger.debug("chunks after filtering: {}", data.A.chunks)
 
         if delayed:
             chunks=data.A.chunks
