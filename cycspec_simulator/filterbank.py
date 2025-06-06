@@ -11,7 +11,7 @@ from .time import Time
 from .cycspec import PeriodicSpectrum, cycfold_cpu
 from .folding import fold_channelized
 from .polarization import coherence_to_stokes
-from .gpu import have_cuda, cuda_failure
+from .gpu import have_cuda
 if have_cuda:
     from .cycspec_gpu import cycfold_gpu
 
@@ -48,9 +48,12 @@ def pfb(x, nchan, ntap, window="hamming", fs=1.0):
     x = x[:ns_chan*nchan].reshape((ns_chan, nchan))
     h = h.reshape((ntap, nchan))
     xs = np.zeros((ns_chan-ntap+1, nchan), dtype=x.dtype)
+    # This correlate is clever, but for very long time series it's the problem,
+    # since it can't be trivially parallelized across blocks
+    # (it sticks everything into a very long FFT).
     for ichan in range(nchan):
         xs[:,ichan] = signal.correlate(x[:,ichan], h[:,ichan], mode="valid")
-    # need scipy fft to avoid dtype promotion
+    # need scipy fft to avoid dtype promotion (really??P)
     xpfb = fft.fft(xs, nchan, axis=1)
     xpfb *= np.sqrt(nchan)
     xpfb = fft.fftshift(xpfb.T, axes=0)
@@ -80,6 +83,69 @@ def channelize(data, nchan, ntap=24, window="hamming", rechunk=True):
     freqs = fft.fftshift(fft.fftfreq(nchan, d=1/data.bandwidth))
     freqs += data.obsfreq
     start_time = data.t[nchan*ntap//2]
+
+    h = signal.firwin(ntap*nchan,cutoff=1.0/nchan, window="rectangular")
+    h *= signal.get_window(window, ntap*nchan)
+    h = h.reshape((ntap, nchan))
+    ns_chan = data.A.shape[0]//nchan
+
+    def process_block(block):
+        out = np.zeros((ns_chan-ntap+1, nchan), dtype=block.dtype)
+        for ichan in range(nchan):
+            out[:,ichan] = signal.correlate(block[:,ichan], h[:,ichan], mode="valid")
+        out = np.fft.fft(out, axis=1)
+
+    if data.delayed:
+        if rechunk and any(chunk % nchan for chunk in data.chunks[0]):
+            new_chunk_size = int(np.ceil(max(data.A.chunks[0])/nchan))*nchan
+            A = data.A.rechunk(new_chunk_size)
+            B = data.B.rechunk(new_chunk_size)
+        else:
+            A = data.A
+            B = data.B
+        A = A[:ns_chan*nchan].reshape((ns_chan, nchan))
+        B = B[:ns_chan*nchan].reshape((ns_chan, nchan))
+
+        A = da.map_overlap(
+            process_block, A, depth={0: (nchan*(ntap-1), 0)}, dtype=data.A.dtype,
+        )
+        B = da.map_overlap(
+            process_block, B, depth={0: (nchan*(ntap-1), 0)}, dtype=data.A.dtype,
+        )
+        start_time = start_time.compute()
+    else:
+        A = process_block(data.A)
+        B = process_block(data.B)
+    return ChannelizedData(
+        A.T, B.T,
+        start_time=start_time,
+        feed_poln=data.feed_poln,
+        chan_bw=data.bandwidth/nchan, freqs=freqs,
+    )
+
+def channelize_old(data, nchan, ntap=24, window="hamming", rechunk=True):
+    """
+    Channelize a BasebandData object using a polyphase filterbank.
+
+    Parameters
+    ----------
+    data: BasebandData object
+    nchan: Number of channels into which to split the data
+    ntap: Number of polyphase fiterbank taps
+    window: Window function used for polyphase filterbank
+            (string interpreted by `scipy.signal.get_window()`)
+    rechunk: Whether to re-chunk the input arrays so that the
+             chunk size is a multiple of `nchan`. Without this,
+             some samples will be skipped at block boundaries,
+             leading to a slight drift.
+
+    Returns
+    -------
+    channelized_data: ChannelizedData object
+    """
+    freqs = fft.fftshift(fft.fftfreq(nchan, d=1/data.bandwidth))
+    freqs += data.obsfreq
+    start_time = data.t[nchan*ntap//2] # It works, but why???
     if data.delayed:
         if rechunk and any(chunk % nchan for chunk in data.chunks[0]):
             new_chunk_size = int(np.ceil(max(data.chunks[0])/nchan))*nchan
@@ -266,7 +332,7 @@ class ChannelizedData:
             cycfold_kwargs = {}
         elif use_cuda:
             err = ValueError("use_cuda was specified, but no CUDA device was found")
-            raise err from cuda_failure
+            raise err
         else:
             cycfold = cycfold_cpu
             cycfold_kwargs = {'n_threads': n_threads}

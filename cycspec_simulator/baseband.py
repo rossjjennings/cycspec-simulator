@@ -11,7 +11,7 @@ from .time import Time
 from .cycspec import PeriodicSpectrum, cycfold_cpu
 from .folding import fold_numba
 from .polarization import coherence_to_stokes
-from .gpu import have_cuda, cuda_failure
+from .gpu import have_cuda
 if have_cuda:
     from .cycspec_gpu import cycfold_gpu
 
@@ -278,7 +278,6 @@ class BasebandData:
             return cycfold_gpu(self, nchan, nbin, predictor, n_workers=n_workers)
         elif use_cuda:
             err = ValueError("use_cuda was specified, but no CUDA device was found")
-            raise err from cuda_failure
         else:
             return cycfold_cpu(
                 self, nchan, nbin, predictor, n_threads=n_threads, n_workers=n_workers
