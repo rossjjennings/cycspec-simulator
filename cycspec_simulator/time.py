@@ -3,6 +3,10 @@ import numba as nb
 import dask.array as da
 from astropy.utils.iers import LeapSeconds
 
+from .gpu import have_cuda
+if have_cuda:
+    import cupy as cp
+
 # Get the list of leap seconds from Astropy.
 # It is updated automatically from the official IERS table at
 #   https://hpiers.obspm.fr/iers/bul/bulc/Leap_Second.dat.
@@ -57,6 +61,24 @@ class Time:
     @property
     def delayed(self):
         return isinstance(self.offset, da.Array)
+
+    @property
+    def device(self):
+        if not have_cuda:
+            return False
+        elif self.delayed:
+            return isinstance(self.offset._meta, cp.ndarray)
+        else:
+            return isinstance(self.offset, cp.ndarray)
+
+    def to_device(self):
+        if not have cuda:
+            raise ValueError("No device available")
+        if self.delayed:
+            offset = self.offset.to_backend('cupy')
+        else:
+            offset = cp.asarray(offset)
+        return Time(self.mjd, self.second, offset)
 
     def compute(self):
         if self.delayed:

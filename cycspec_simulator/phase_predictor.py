@@ -46,7 +46,11 @@ class FreqOnlyPredictor(PhasePredictor):
         ----------
         t: Time at which the phase is to be evaluated (possibly an array).
         """
-        return self.f0*(t - self.epoch)
+        if t.device:
+            epoch = self.epoch.to_device()
+        else:
+            epoch = self.epoch
+        return self.f0*(t - epoch)
 
 class PolynomialPredictor(PhasePredictor):
     """
