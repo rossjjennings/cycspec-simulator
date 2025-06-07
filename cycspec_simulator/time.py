@@ -77,7 +77,7 @@ class Time:
         if self.delayed:
             offset = self.offset.to_backend('cupy')
         else:
-            offset = cp.asarray(offset)
+            offset = cp.asarray(self.offset)
         return Time(self.mjd, self.second, offset)
 
     def compute(self):
