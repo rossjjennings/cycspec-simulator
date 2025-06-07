@@ -72,7 +72,7 @@ class Time:
             return isinstance(self.offset, cp.ndarray)
 
     def to_device(self):
-        if not have cuda:
+        if not have_cuda:
             raise ValueError("No device available")
         if self.delayed:
             offset = self.offset.to_backend('cupy')
