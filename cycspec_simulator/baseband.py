@@ -13,6 +13,7 @@ from .folding import fold_numba
 from .polarization import coherence_to_stokes
 from .gpu import have_cuda
 if have_cuda:
+    import cupy as cp
     from .cycspec_gpu import cycfold_gpu
 
 class RandomNumberGenerator(metaclass=ABCMeta):
@@ -185,16 +186,26 @@ class BasebandModel:
         n_samples = np.int64(duration*self.bandwidth)
         return sample(n_samples, phase_start, interp)
 
-def get_time_axis(start_time, n_samples, bandwidth, delayed=False, chunks="auto"):
-    t_span = n_samples/bandwidth
+def get_time_axis(start_time, n_samples, bandwidth, delayed=False, device=False, chunks="auto"):
     if delayed:
-        sample_offsets = da.linspace(0, t_span, n_samples, endpoint=False, chunks=chunks)
+        if device:
+            with dask.config.set({'array.backend': 'cupy'}):
+                offset = da.arange(0, n_samples, chunks=chunks)/bandwidth
+                offset = offset + cp.array(start_time.offset)
+        else:
+            offset = da.arange(0, n_samples, chunks=chunks)/bandwidth
+            offset = offset + start_time.offset
     else:
-        sample_offsets = np.linspace(0, t_span, n_samples, endpoint=False)
+        if device:
+            offset = cp.arange(0, n_samples)/bandwidth
+            offset = offset + cp.array(start_time.offset)
+        else:
+            offset = np.arange(0, n_samples)/bandwidth
+            offset = offset + start_time.offset
     return Time(
         start_time.mjd,
         start_time.second,
-        start_time.offset + sample_offsets,
+        offset,
     )
 
 class BasebandData:
