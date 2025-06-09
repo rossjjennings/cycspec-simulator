@@ -1,11 +1,15 @@
 import numpy as np
 import dask.array as da
-from scipy import fft
+import scipy.fft
 
 from .linear_filter import LinearFilter
 from .baseband import BasebandData
+from .gpu import have_cuda
+if have_cuda:
+    import cupy as cp
+    import cupyx.scipy.fft
 
-DM_CONSTANT = 1e16/2.41 # Hz cm**3 pc**-1
+DM_CONSTANT = 1e16/2.41 # Hz**2 s cm**3 pc**-1
 
 class DispersionFilter(LinearFilter):
     def __init__(self, dm, bandwidth, obsfreq=0):
@@ -43,8 +47,13 @@ class DispersionFilter(LinearFilter):
         x = f/self.obsfreq
         return np.exp(2j*np.pi*a*x**2/(1 + x))
 
-    def apply_block(self, block):
+    def apply_block(self, block, device=False):
         H = self.filter_function(block.shape[-1]).astype(block.dtype)
+        if device:
+            fft = cupyx.scipy.fft
+            H = cp.array(H)
+        else:
+            fft = scipy.fft
         # need scipy fft to avoid dtype promotion
         return fft.ifft(H*fft.fft(block))
 
@@ -56,13 +65,27 @@ class DispersionFilter(LinearFilter):
         if data.obsfreq != self.obsfreq or data.bandwidth != self.bandwidth:
             raise ValueError(f"Data observing frequency ({data.obsfreq} Hz) "
                              f"and channel bandwidth ({data.bandwidth} Hz) "
-                             "do not match this scintillation pattern")
+                             "do not match this dispersion filter")
 
         ndm = self.ndm
 
         if data.delayed:
-            A = da.map_overlap(self.apply_block, data.A, depth=ndm//2, boundary=None)
-            B = da.map_overlap(self.apply_block, data.B, depth=ndm//2, boundary=None)
+            A = da.map_overlap(
+                self.apply_block,
+                data.A,
+                device=data.device,
+                depth=ndm//2,
+                boundary=None,
+                meta=data.A._meta,
+            )
+            B = da.map_overlap(
+                self.apply_block,
+                data.B,
+                device=data.device,
+                depth=ndm//2,
+                boundary=None,
+                meta=data.B._meta,
+            )
             A = A[ndm//2:-ndm//2]
             B = B[ndm//2:-ndm//2]
             t = data.t[ndm//2].compute()
