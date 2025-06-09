@@ -139,14 +139,13 @@ class PolynomialPredictor(PhasePredictor):
                 segment_epoch = segment.epoch
             diffs.append(t - segment_epoch)
         if t.delayed:
-            diffs = da.stack(diffs, axis=0)
-            closest_segment = da.argmin(da.abs(diffs), axis=0)
+            xp = da
         elif t.device:
-            diffs = cp.stack(diffs, axis=0)
-            closest_segment = cp.argmin(cp.abs(diffs), axis=0)
+            xp = cp
         else:
-            diffs = np.stack(diffs, axis=0)
-            closest_segment = np.argmin(np.abs(diffs), axis=0)
+            xp = np
+        diffs = xp.stack(diffs, axis=0)
+        closest_segment = xp.argmin(xp.abs(diffs), axis=0)
         return closest_segment
 
     def covers(self, t):
@@ -154,7 +153,13 @@ class PolynomialPredictor(PhasePredictor):
         Return a boolean value (or array) indicating whether this phase predictor
         includes a segment covering the time `t`. Broadcasts over arrays.
         """
-        return np.any([segment.covers(t) for segment in self.segments], axis=0)
+        if t.delayed:
+            xp = da
+        elif t.device:
+            xp = cp
+        else:
+            xp = np
+        return xp.any([segment.covers(t) for segment in self.segments], axis=0)
 
     def phase(self, t, check_bounds=True, reduce_refphase=True):
         """
@@ -171,8 +176,14 @@ class PolynomialPredictor(PhasePredictor):
                          zero by a whole number of turns, increasing the precision
                          that can be retained in the fractional part.
         """
+        if t.delayed:
+            xp = da
+        elif t.device:
+            xp = cp
+        else:
+            xp = np
         closest_segment = self.closest_segment(t)
-        phase = np.empty_like(t.offset)
+        phase = xp.empty_like(t.offset)
         for i, segment in enumerate(self.segments):
             sl = (closest_segment == i)
             phase[sl] = segment.phase(t[sl], check_bounds, reduce_refphase)
@@ -318,14 +329,22 @@ class PolynomialSegment:
         t: Specified time (possibly an array).
         check_bounds: Whether to raise an error if any times are out of bounds.
         """
+        if t.delayed:
+            xp = da
+        elif t.device:
+            xp = cp
+        else:
+            xp = np
+
         if t.device:
             epoch = self.epoch.to_device()
         else:
             epoch = self.epoch
         dt = (t - self.epoch)/60 # minutes
+
         if check_bounds:
             not_covered = ~self.covers(t)
-            if np.any(not_covered):
-                i = np.where(not_covered)[0][0]
+            if xp.any(not_covered):
+                i = xp.where(not_covered)[0][0]
                 raise ValueError(f'Time at position {i} out of bounds.')
         return dt
