@@ -161,7 +161,7 @@ class PolynomialPredictor(PhasePredictor):
             xp = np
         return xp.any([segment.covers(t) for segment in self.segments], axis=0)
 
-    def phase(self, t, check_bounds=True, reduce_refphase=True):
+    def phase(self, t, check_bounds=False, reduce_refphase=True):
         """
         Return the phase of the pulsar at time `t`, as predicted by the
         segment whose center is closest to `t`.
@@ -171,6 +171,8 @@ class PolynomialPredictor(PhasePredictor):
         t: Time at which the phase is to be evaluated.
         check_bounds: Whether to raise an error if any times are out of bounds,
                       or just extrapolate based on the closest segment.
+                      Warning: this check can take a significant amount of time
+                      if `t` is a large array.
         reduce_refphase: Whether to reduce the reference phase modulo 1 before
                          computing the phase. This will bring the phase closer to
                          zero by a whole number of turns, increasing the precision
@@ -182,11 +184,17 @@ class PolynomialPredictor(PhasePredictor):
             xp = cp
         else:
             xp = np
-        closest_segment = self.closest_segment(t)
-        phase = xp.empty_like(t.offset)
-        for i, segment in enumerate(self.segments):
-            sl = (closest_segment == i)
-            phase[sl] = segment.phase(t[sl], check_bounds, reduce_refphase)
+
+        if len(self.segments) == 1:
+            # Work around da.choose() not working in this case
+            phase = self.segments[0].phase(t, check_bounds, reduce_refphase)
+        else:
+            closest_segment = self.closest_segment(t)
+            phase_by_segment = (
+                segment.phase(t[sl], check_bounds, reduce_refphase)
+                for segment in self.segments
+            )
+            phase = xp.choice(closest_segment, xp.array(phase_by_segment))
 
         return phase[()] # turns 0d arrays into scalars, otherwise harmless
 
@@ -250,7 +258,7 @@ class PolynomialSegment:
             log10_fit_err = rec['LGFITERR'],
         )
 
-    def phase(self, t, check_bounds=True, reduce_refphase=True):
+    def phase(self, t, check_bounds=False, reduce_refphase=True):
         """
         Calculate the phase at a particular time.
 
@@ -259,6 +267,8 @@ class PolynomialSegment:
         t: Time at which the phase is to be evaluated.
         check_bounds: Whether to raise an error if any times are out of bounds,
                       or extrapolate beyond the bounds of the segment.
+                      Warning: this check can take a significant amount of time
+                      if `t` is a large array.
         reduce_refphase: Whether to reduce the reference phase modulo 1 before
                          computing the phase. This will bring the phase closer to
                          zero by a whole number of turns, increasing the precision
@@ -280,7 +290,7 @@ class PolynomialSegment:
         phase = ref_phase + dt*60*self.ref_f0 + dphase
         return phase
 
-    def dphase(self, t, check_bounds=True, ref_time=None):
+    def dphase(self, t, check_bounds=False, ref_time=None):
         """
         Return the difference between the phase of the pulsar at time `t`
         and the phase at a reference time.
@@ -290,6 +300,8 @@ class PolynomialSegment:
         t: Time at which the phase is to be evaluated.
         check_bounds: If True, raise an exception if any of the times
             represented by `t` are outside the bounds of this segment.
+            Warning: this check can take a significant amount of time
+            if `t` is a large array.
         ref_time: Reference time. If None, the model epoch will be used.
         """
         if t.device:
@@ -315,7 +327,7 @@ class PolynomialSegment:
             phase -= polynomial.polyval(ref_dt, self.coeffs)
         return phase
 
-    def f0(self, t, check_bounds=True):
+    def f0(self, t, check_bounds=False):
         """
         Return the instantaneous topocentric frequency of the pulsar at time `t`.
 
@@ -324,6 +336,8 @@ class PolynomialSegment:
         t: Time at which the phase is to be evaluated.
         check_bounds: If True, raise an exception if any of the times
             represented by `t` are outside the bounds of this segment.
+            Warning: this check can take a significant amount of time
+            if `t` is a large array.
         """
         if t.device:
             polyval = cp.polynomial.polynomial.polyval
