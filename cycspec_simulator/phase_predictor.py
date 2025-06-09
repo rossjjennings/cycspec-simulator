@@ -264,9 +264,20 @@ class PolynomialSegment:
                          zero by a whole number of turns, increasing the precision
                          that can be retained in the fractional part.
         """
+        if t.device:
+            polyval = cp.polynomial.polynomial.polyval
+        else:
+            polyval = np.polynomial.polynomial.polyval
+
         dt = self.dt(t, check_bounds)
         ref_phase = (self.ref_phase % 1) if reduce_refphase else self.ref_phase
-        phase = ref_phase + dt*60*self.ref_f0 + polynomial.polyval(dt, self.coeffs)
+
+        if t.delayed:
+            dphase = da.map_blocks(polyval, dt, self.coeffs, meta=dt._meta)
+        else:
+            dphase = polyval(dt, self.coeffs)
+
+        phase = ref_phase + dt*60*self.ref_f0 + dphase
         return phase
 
     def dphase(self, t, check_bounds=True, ref_time=None):
@@ -281,13 +292,26 @@ class PolynomialSegment:
             represented by `t` are outside the bounds of this segment.
         ref_time: Reference time. If None, the model epoch will be used.
         """
+        if t.device:
+            polyval = cp.polynomial.polynomial.polyval
+            if ref_time is not None:
+                ref_time = ref_time.to_device()
+        else:
+            polyval = np.polynomial.polynomial.polyval
+
         dt = self.dt(t, check_bounds)
+
+        if t.delayed:
+            dphase = da.map_blocks(polyval, dt, self.coeffs, meta=dt._meta)
+        else:
+            dphase = polyval(dt, self.coeffs)
+
         if ref_time is None:
-            phase = dt*60*self.ref_f0 + polynomial.polyval(dt, self.coeffs)
+            phase = dt*60*self.ref_f0 + dphase
             phase -= self.coeffs[0] # equivalent to polynomial.polyval(0, self.coeffs)
         else:
             ref_dt = self.dt(ref_time)
-            phase = (dt-ref_dt)*60*self.ref_f0 + polynomial.polyval(dt, self.coeffs)
+            phase = (dt-ref_dt)*60*self.ref_f0 + dphase
             phase -= polynomial.polyval(ref_dt, self.coeffs)
         return phase
 
@@ -301,10 +325,20 @@ class PolynomialSegment:
         check_bounds: If True, raise an exception if any of the times
             represented by `t` are outside the bounds of this segment.
         """
-        dt = self.dt(t, check_bounds)
+        if t.device:
+            polyval = cp.polynomial.polynomial.polyval
+        else:
+            polyval = np.polynomial.polynomial.polyval
 
+        dt = self.dt(t, check_bounds)
         der_coeffs = polynomial.polyder(self.coeffs)
-        f0 = self.ref_f0 + polynomial.polyval(dt, der_coeffs)/60
+
+        if t.delayed:
+            df0 = da.map_blocks(polyval, dt, der_coeffs, meta=dt._meta)/60
+        else:
+            df0 = polyval(dt, der_coeffs)/60
+
+        f0 = self.ref_f0 + df0
         return f0
 
     def covers(self, t):
@@ -312,14 +346,22 @@ class PolynomialSegment:
         Return a boolean value (or array) indicating whether this segment
         covers the time `t`. Broadcasts over arrays.
         """
+        if t.delayed:
+            xp = da
+        elif t.device:
+            xp = cp
+        else:
+            xp = np
+
         if t.device:
             epoch = self.epoch.to_device()
         else:
             epoch = self.epoch
-        dt = (t - self.epoch)/60 # minutes
-        return np.abs(dt) <= self.span/2
 
-    def dt(self, t, check_bounds=True):
+        dt = (t - self.epoch)/60 # minutes
+        return xp.abs(dt) <= self.span/2
+
+    def dt(self, t, check_bounds=False):
         """
         Calculate the time difference, in minutes, between `t` and the model epoch,
         or raise an error if `t` is outside the bounds of this segment.
@@ -328,6 +370,8 @@ class PolynomialSegment:
         ----------
         t: Specified time (possibly an array).
         check_bounds: Whether to raise an error if any times are out of bounds.
+                      Warning: this check can take a significant amount of time
+                      if `t` is a large array.
         """
         if t.delayed:
             xp = da
