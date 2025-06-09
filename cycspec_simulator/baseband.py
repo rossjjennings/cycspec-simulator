@@ -87,7 +87,7 @@ class BasebandModel:
         self.filters.append(filtr)
 
     def sample(self, n_samples, t_start=None, interp=lerp, dtype=np.complex64,
-               rng=None, chunks='auto'):
+               rng=None, delayed=True, device=False, seed=None, chunks='auto'):
         """
         Simulate a given number of samples from the modeled baseband time series.
 
@@ -102,8 +102,11 @@ class BasebandModel:
                 `fft_interp` and `lerp` (the default) both work.
         dtype: Numpy dtype to use for samples.
         rng: `RandomNumberGenerator` object used to generate white noise that
-             is filtered to create the baseband data. If `None`, an instance of
-             `np.random.default_rng()` will be created.
+             is filtered to create the baseband data. If `None`, one will be created
+             based on the `delayed`, `device`, and `seed` parameters.
+        delayed: Whether to create a Dask array instead of an in-memory array.
+        device: If `True`, create the sample arrays in GPU device memory.
+        seed: Seed for random number generation. Has no effect unless `rng` is `None`.
         chunks: Size of chunks to use. Has no effect unless using a `DelayedRNG`.
         """
         if t_start is None:
@@ -112,7 +115,15 @@ class BasebandModel:
         real_dtype = np.array(0).astype(dtype).real.dtype
         logger.debug("requested dtype: {}", dtype)
         if rng is None:
-            rng = np.random.default_rng()
+            if delayed and device:
+                with dask.config.set({'array.backend': 'cupy'}):
+                    rng = da.random.default_rng(seed=seed)
+            elif delayed:
+                rng = da.random.default_rng(seed=seed)
+            elif device:
+                rng = cp.random.default_rng(seed=seed)
+            else:
+                rng = np.random.default_rng(seed=seed)
 
         delayed = isinstance(rng, DelayedRNG)
         if delayed:
@@ -127,12 +138,18 @@ class BasebandModel:
         for filtr in self.filters:
             n_samples += filtr.nlag_pos + filtr.nlag_neg
 
-        t = get_time_axis(t_start, n_samples, self.bandwidth, delayed=delayed, chunks=chunks)
+        t = get_time_axis(t_start, n_samples, self.bandwidth, delayed=delayed,
+                          device=device, chunks=chunks)
         phase = self.predictor.phase(t) - int(self.predictor.phase(t_start))
         binno = (phase*self.template.nbin).astype(real_dtype)
         I = interp(self.template.I, binno)
         noise1 = complex_white_noise(n_samples, rng, dtype, chunks)
         noise2 = complex_white_noise(n_samples, rng, dtype, chunks)
+        if delayed:
+            logger.debug("phase meta type: {}", type(phase._meta))
+            logger.debug("binno meta type: {}", type(binno._meta))
+            logger.debug("I meta type: {}", type(I._meta))
+            logger.debug("noise1 meta type: {}", type(noise1._meta))
         if self.template.full_stokes:
             Q = interp(self.template.Q, binno)
             U = interp(self.template.U, binno)
