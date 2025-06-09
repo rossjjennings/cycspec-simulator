@@ -126,7 +126,14 @@ class PolynomialPredictor(PhasePredictor):
         Find the segment whose center is closest to the time `t`.
         Broadcasts over arrays.
         """
-        diffs = np.array([t - segment.epoch for segment in self.segments])
+        diffs = []
+        for segment in self.segments:
+            if t.device:
+                segment_epoch = segment.epoch.to_device()
+            else:
+                segment_epoch = segment.epoch
+            diffs.append(t - segment_epoch)
+        diffs = np.array(diffs)
         closest_segment = np.argmin(np.abs(diffs), axis=0)
         return closest_segment
 
@@ -282,6 +289,10 @@ class PolynomialSegment:
         Return a boolean value (or array) indicating whether this segment
         covers the time `t`. Broadcasts over arrays.
         """
+        if t.device:
+            epoch = self.epoch.to_device()
+        else:
+            epoch = self.epoch
         dt = (t - self.epoch)/60 # minutes
         return np.abs(dt) <= self.span/2
 
@@ -295,6 +306,10 @@ class PolynomialSegment:
         t: Specified time (possibly an array).
         check_bounds: Whether to raise an error if any times are out of bounds.
         """
+        if t.device:
+            epoch = self.epoch.to_device()
+        else:
+            epoch = self.epoch
         dt = (t - self.epoch)/60 # minutes
         if check_bounds:
             not_covered = ~self.covers(t)
