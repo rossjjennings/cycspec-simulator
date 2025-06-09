@@ -1,6 +1,10 @@
 import numpy as np
 import dask.array as da
 
+from .gpu import have_cuda
+if have_cuda:
+    import cupy as cp
+
 def fft_roll(arr, shift):
     """
     Roll array by a given (possibly fractional) amount, in bins.
@@ -10,12 +14,19 @@ def fft_roll(arr, shift):
     This is the reverse of the convention used by pypulse.utils.fftshift().
     If the array has more than one axis, the last axis is shifted.
     """
+    if isinstance(arr, da.array):
+        xp = da
+    elif isinstance(arr, cp.array):
+        xp = cp
+    else:
+        xp = np
+
     n = arr.shape[-1]
     if not hasattr(shift, 'shape'):
-        shift = np.array(shift)
-    shift = shift[..., np.newaxis]
-    phase = -2j*np.pi*shift*np.fft.rfftfreq(n)
-    return np.fft.irfft(np.fft.rfft(arr)*np.exp(phase), n)
+        shift = xp.array(shift)
+    shift = shift[..., xp.newaxis]
+    phase = -2j*xp.pi*shift*xp.fft.rfftfreq(n)
+    return xp.fft.irfft(xp.fft.rfft(arr)*xp.exp(phase), n)
 
 def fft_interp(arr, x):
     """
@@ -23,11 +34,18 @@ def fft_interp(arr, x):
     As with `fft_roll()`, this works by using the amplitudes and frequencies
     associated with the DFT of `arr` to define a continuous function.
     """
+    if isinstance(arr, da.array):
+        xp = da
+    elif isinstance(arr, cp.array):
+        xp = cp
+    else:
+        xp = np
+
     n = arr.shape[-1]
     if not hasattr(x, 'shape'):
-        x = np.array(x)
-    phase = 2j*np.pi*x[..., np.newaxis]*np.fft.fftfreq(n)
-    return np.mean(np.fft.fft(arr)*np.exp(phase), axis=-1)[()]
+        x = xp.array(x)
+    phase = 2j*xp.pi*x[..., xp.newaxis]*xp.fft.fftfreq(n)
+    return xp.mean(xp.fft.fft(arr)*xp.exp(phase), axis=-1)[()]
 
 def lerp(arr, x):
     """
@@ -35,13 +53,20 @@ def lerp(arr, x):
     For locations `x` outside the original array, extrapolate the function
     periodically.
     """
+    if isinstance(arr, da.array):
+        xp = da
+    elif isinstance(arr, cp.array):
+        xp = cp
+    else:
+        xp = np
+
     n = arr.shape[-1]
     if not hasattr(x, 'shape'):
-        x = np.array(x)
-    floor = np.floor(x)
+        x = xp.array(x)
+    floor = xp.floor(x)
     t = x - floor
-    pre_idx = floor.astype(np.int64) % n
-    post_idx = np.ceil(x).astype(np.int64) % n
+    pre_idx = floor.astype(xp.int64) % n
+    post_idx = xp.ceil(x).astype(xp.int64) % n
     pre_val = da.take(arr, pre_idx)
     post_val = da.take(arr, post_idx)
     interp_val = (1-t)*pre_val + t*post_val
