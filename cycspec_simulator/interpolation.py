@@ -53,10 +53,14 @@ def lerp(arr, x):
     For locations `x` outside the original array, extrapolate the function
     periodically.
     """
-    if isinstance(arr, da.Array):
+    if isinstance(x, da.Array):
         xp = da
-    elif isinstance(arr, cp.ndarray):
+        if isinstance(x._meta, cp.ndarray):
+            arr = cp.array(arr)
+        arr = da.array(arr)
+    elif isinstance(x, cp.ndarray):
         xp = cp
+        arr = cp.array(arr)
     else:
         xp = np
 
