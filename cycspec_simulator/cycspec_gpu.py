@@ -80,7 +80,89 @@ def corrfold_kernel(A, B, nbin, binplan, n_samples, AA, AB, BA, BB, include_end=
         cuda.atomic.add(BB, (ilag, ibin, 0), product_BB.real)
         cuda.atomic.add(BB, (ilag, ibin, 1), product_BB.imag)
 
-def corrfold_gpu(A, B, nlag, nbin, binplan, stream, include_end=False):
+@cuda.jit(device=True)
+def warpagg_add_pair(arr, indices, val1, val2):
+    # create mask of all peer threads with higher laneid
+    ravel_index = indices[0]*arr.shape[0] + arr.shape[1]
+    mask = cuda.match_any_sync(cuda.activemask(), ravel_index) & cuda.activemask()
+    upper = mask & (~((2<<cuda.laneid) - 1))
+
+    # we will be copying values from src_lane using shfl_sync()
+    src_lane = cuda.ffs(upper) - 1
+    active = upper != 0
+    for i in range(5): # 2**5 = 32
+        active = active and 0 <= src_lane < 32
+        # all calls to shfl_sync() must be unconditional to avoid weird behavior
+        new_val1 = cuda.shfl_sync(mask, val1, src_lane)
+        new_val2 = cuda.shfl_sync(mask, val2, src_lane)
+        new_src_lane = cuda.shfl_sync(mask, src_lane, src_lane)
+        if active:
+            val1 += new_val1
+            val2 += new_val2
+            src_lane = new_src_lane
+
+    # only the leader thread does the final atomic adds
+    if cuda.laneid == cuda.ffs(mask) - 1:
+        cuda.atomic.add(arr, (*indices, 0), val1)
+        cuda.atomic.add(arr, (*indices, 1), val2)
+
+@cuda.jit(device=True)
+def warpagg_add_count(arr, indices):
+    # create mask of all peer threads with higher laneid
+    ravel_index = indices[0]*arr.shape[0] + arr.shape[1]
+    mask = cuda.match_any_sync(cuda.activemask(), ravel_index) & cuda.activemask()
+
+    # no need to do a complex warp reduction when `popc()` will do
+    count = cuda.popc(mask)
+    # leader thread adds the count
+    if cuda.laneid == cuda.ffs(mask) - 1:
+        cuda.atomic.add(arr, indices, count)
+
+@cuda.jit()
+def corrfold_kernel_warpagg(A, B, nbin, binplan, n_samples, AA, AB, BA, BB, include_end=False):
+    """
+    Compute the cyclic autocorrelation function from sampled data, using CUDA.
+    This CUDA kernel is intended to be used internally by cycfold_gpu().
+    This version is optimized using warp aggregation.
+
+    Parameters
+    ----------
+    A, B: Baseband samples in each of two polarizations (each of length n)
+    nbin: Number of phase bins in which to accumulate
+    binplan: Array giving the phase bin corresponding to each half-sample time
+          (length 2*n - 1, where n is the number of samples)
+    n_samples: Output array which will be used to hold the number of samples
+          accumulated into each phase bin for each lag.
+    AA, AB, BA, BB: Output arrays which will be used to hold each of the polarization
+          components of the result, for both real and imaginary part.
+          These should have shape (nbin, nlag, 2), where the last axis (of length 2)
+          will hold the real and imaginary part at index 0 and 1, respectively.
+    include_end: Whether to calculate products where the first sample is among
+          the last nlag - ilag - 1 samples. In such cases, there are fewer than
+          nlag choices for the second sample. Setting include_end=True means that
+          slightly more samples will contribute to lower lags.
+    """
+    ithread, ilag = cuda.grid(2)
+    nthreads, nlag = cuda.gridsize(2)
+
+    if include_end:
+        ncorr = A.shape[0] - ilag
+    else:
+        ncorr = A.shape[0] - nlag + 1
+
+    for icorr in range(ithread, ncorr, nthreads):
+        ibin = binplan[2*icorr + ilag]
+        warpagg_add_count(n_samples, (ilag, ibin))
+        product_AA = (A[icorr + ilag] * A[icorr].conjugate())
+        warpagg_add_pair(AA, (ilag, ibin), product_AA.real, product_AA.imag)
+        product_AB = (A[icorr + ilag] * B[icorr].conjugate())
+        warpagg_add_pair(AB, (ilag, ibin), product_AB.real, product_AB.imag)
+        product_BA = (B[icorr + ilag] * A[icorr].conjugate())
+        warpagg_add_pair(BA, (ilag, ibin), product_BA.real, product_BA.imag)
+        product_BB = (B[icorr + ilag] * B[icorr].conjugate())
+        warpagg_add_pair(BB, (ilag, ibin), product_BB.real, product_BB.imag)
+
+def corrfold_gpu(A, B, nlag, nbin, binplan, stream, include_end=False, use_warpagg=True):
     """
     Wrap the CUDA kernel into something more directly analogous to corrfold_cpu.
     Copies data to GPU, allocates GPU memory, invokes the kernel, and cleans up output.
@@ -99,6 +181,7 @@ def corrfold_gpu(A, B, nlag, nbin, binplan, stream, include_end=False):
           the last nlag - ilag - 1 samples. In such cases, there are fewer than
           nlag choices for the second sample. Setting include_end=True means that
           slightly more samples will contribute to lower lags.
+    use_warpagg: Use the optimized kernel with warp aggregated atomic adds.
     """
     complex_dtype = A.dtype
     real_dtype = A.real.dtype
@@ -124,9 +207,14 @@ def corrfold_gpu(A, B, nlag, nbin, binplan, stream, include_end=False):
     logger.debug(f"Launching grid with gridsize {(nblocks, nlag)} and blocksize {(blocksize, 1)}")
 
     with CUDATimer(stream) as cudatimer:
-        corrfold_kernel[(nblocks, nlag), (blocksize, 1), stream](
-            A_gpu, B_gpu, nbin, binplan, samples, AA, AB, BA, BB, include_end,
-        )
+        if use_warpagg:
+            corrfold_kernel_warpagg[(nblocks, nlag), (blocksize, 1), stream](
+                A_gpu, B_gpu, nbin, binplan, samples, AA, AB, BA, BB, include_end,
+            )
+        else:
+            corrfold_kernel[(nblocks, nlag), (blocksize, 1), stream](
+                A_gpu, B_gpu, nbin, binplan, samples, AA, AB, BA, BB, include_end,
+            )
     elapsed = np.array(cudatimer.elapsed, dtype=np.float64)
 
     i = cupy.array(1j, dtype=complex_dtype)
@@ -138,7 +226,7 @@ def corrfold_gpu(A, B, nlag, nbin, binplan, stream, include_end=False):
 
     return AA, BB, CR, CI, samples, elapsed
 
-def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=None):
+def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=None, use_warpagg=True):
     """
     Compute the periodic spectrum from sampled data, using CUDA.
 
@@ -151,6 +239,7 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=
           a phase() method which can be called with a Time object to yield the
           corresponding array of phases.
     include_end: Passed along to corrfold_gpu(), see there for details.
+    use_warpagg: Use the optimized kernel with warp aggregated atomic adds.
     """
     complex_dtype = data.A.dtype
     logger.debug(f"Input dtype: {complex_dtype}")
@@ -183,7 +272,7 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=
         for A_blk, B_blk, plan_blk in zip(A.blocks, B.blocks, binplan.blocks):
             corrfold = dask.delayed(corrfold_gpu, nout=6)
             AA_blk, BB_blk, CR_blk, CI_blk, samples_blk, elapsed_blk = corrfold(
-                A_blk, B_blk, nlag, nbin, plan_blk, stream, include_end
+                A_blk, B_blk, nlag, nbin, plan_blk, stream, include_end, use_warpagg,
             )
             AA.append(da.from_delayed(AA_blk, (nlag, nbin), dtype=data.A.dtype))
             BB.append(da.from_delayed(BB_blk, (nlag, nbin), dtype=data.A.dtype))
@@ -206,7 +295,7 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=
         logger.info(f"Throughput: {throughput:g} products/sec.")
     else:
         AA, BB, CR, CI, samples, elapsed = corrfold_gpu(
-            data.A, data.B, nlag, nbin, binplan, stream, include_end
+            data.A, data.B, nlag, nbin, binplan, stream, include_end, use_warpagg,
         )
         logger.info(f"Elapsed time: {elapsed:g} ms")
         logger.info(f"Total products accumulated: {4*np.sum(samples)}")

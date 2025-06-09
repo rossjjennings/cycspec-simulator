@@ -297,7 +297,7 @@ class BasebandData:
         else:
             return self
 
-    def cycfold(self, nchan, nbin, predictor, use_cuda=have_cuda,
+    def cycfold(self, nchan, nbin, predictor, use_cuda=have_cuda, use_warpagg=True,
                 n_threads=nb.config.NUMBA_NUM_THREADS, n_workers=None):
         """
         Compute the periodic spectrum from baseband data.
@@ -309,16 +309,20 @@ class BasebandData:
         predictor: `PhasePredictor` object to use in computing phases.
         use_cuda: Whether to use CUDA acceleration. Defaults to True if a CUDA
                   device is detected by CuPy. Otherwise defaults to False.
+        use_warpagg: Use the optimized CUDA kernel with warp aggregated atomic adds.
+                     Has no effect if `use_cuda` is `False`.
         n_threads: Number of CPU threads to use. Defaults to the total number of
                    CPUs, as detected by Numba. Has no effect if use_gpu is True.
         """
         if use_cuda and have_cuda:
-            return cycfold_gpu(self, nchan, nbin, predictor, n_workers=n_workers)
+            return cycfold_gpu(
+                self, nchan, nbin, predictor, use_warpagg=use_warpagg, n_workers=n_workers,
+            )
         elif use_cuda:
             err = ValueError("use_cuda was specified, but no CUDA device was found")
         else:
             return cycfold_cpu(
-                self, nchan, nbin, predictor, n_threads=n_threads, n_workers=n_workers
+                self, nchan, nbin, predictor, n_threads=n_threads, n_workers=n_workers,
             )
 
     def fold(self, nbin, predictor):
