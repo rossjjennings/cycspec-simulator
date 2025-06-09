@@ -14,9 +14,9 @@ def fft_roll(arr, shift):
     This is the reverse of the convention used by pypulse.utils.fftshift().
     If the array has more than one axis, the last axis is shifted.
     """
-    if isinstance(arr, da.array):
+    if isinstance(arr, da.Array):
         xp = da
-    elif isinstance(arr, cp.array):
+    elif isinstance(arr, cp.ndarray):
         xp = cp
     else:
         xp = np
@@ -34,9 +34,9 @@ def fft_interp(arr, x):
     As with `fft_roll()`, this works by using the amplitudes and frequencies
     associated with the DFT of `arr` to define a continuous function.
     """
-    if isinstance(arr, da.array):
+    if isinstance(arr, da.Array):
         xp = da
-    elif isinstance(arr, cp.array):
+    elif isinstance(arr, cp.ndarray):
         xp = cp
     else:
         xp = np
@@ -53,9 +53,9 @@ def lerp(arr, x):
     For locations `x` outside the original array, extrapolate the function
     periodically.
     """
-    if isinstance(arr, da.array):
+    if isinstance(arr, da.Array):
         xp = da
-    elif isinstance(arr, cp.array):
+    elif isinstance(arr, cp.ndarray):
         xp = cp
     else:
         xp = np
