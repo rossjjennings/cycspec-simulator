@@ -1,10 +1,18 @@
 import numpy as np
 import dask.array as da
 import matplotlib.pyplot as plt
-from scipy.signal import convolve
+import scipy.signal
+import warnings
 
 from .baseband import BasebandData
 from .linear_filter import LinearFilter
+from .gpu import have_cuda
+if have_cuda:
+    import cupy as cp
+    with warnings.catch_warnings():
+        # ignore the warning about cupyx.jit.rawkernel being experimental
+        warnings.simplefilter("ignore", category=FutureWarning)
+        import cupyx.scipy.signal
 
 class ExponentialScatteringModel:
     def __init__(self, scattering_time, bandwidth, obsfreq=0, cutoff=15):
@@ -165,12 +173,18 @@ class ScatteringFilter(LinearFilter):
         irf = self.impulse_response.astype(data.A.dtype)
         nlag_irf = self.impulse_response.size - 1
 
+        if data.device:
+            convolve = cupyx.scipy.signal.convolve
+            irf = cp.array(irf)
+        else:
+            convolve = scipy.signal.convolve
+
         if data.delayed:
             A = da.overlap.overlap(data.A, depth={0: (nlag_irf, 0)}, boundary=None)
             B = da.overlap.overlap(data.B, depth={0: (nlag_irf, 0)}, boundary=None)
             chunks = ([chunk - nlag_irf for chunk in A.chunks[0]],)
-            A = da.map_blocks(convolve, A, irf, mode='valid', chunks=chunks)
-            B = da.map_blocks(convolve, B, irf, mode='valid', chunks=chunks)
+            A = da.map_blocks(convolve, A, irf, mode='valid', chunks=chunks, meta=A._meta)
+            B = da.map_blocks(convolve, B, irf, mode='valid', chunks=chunks, meta=B._meta)
             t = data.t[nlag_irf].compute()
         else:
             new_size = data.A.size - nlag_irf

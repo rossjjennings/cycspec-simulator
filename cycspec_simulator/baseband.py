@@ -241,6 +241,15 @@ class BasebandData:
         return isinstance(self.A, da.Array)
 
     @property
+    def device(self):
+        if not have_cuda:
+            return False
+        elif self.delayed:
+            return isinstance(self.A._meta, cp.ndarray)
+        else:
+            return isinstance(self.A, cp.ndarray)
+
+    @property
     def n_samples(self):
         return self.A.shape[-1]
 
