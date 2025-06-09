@@ -2,6 +2,11 @@ from abc import ABCMeta, abstractmethod
 import numpy as np
 from numpy.polynomial import polynomial
 import numba as nb
+import dask.array as da
+
+from .gpu import have_cuda
+if have_cuda:
+    import cupy as cp
 
 from .time import Time
 
@@ -133,8 +138,15 @@ class PolynomialPredictor(PhasePredictor):
             else:
                 segment_epoch = segment.epoch
             diffs.append(t - segment_epoch)
-        diffs = np.array(diffs)
-        closest_segment = np.argmin(np.abs(diffs), axis=0)
+        if t.delayed:
+            diffs = da.stack(diffs, axis=0)
+            closest_segment = da.argmin(da.abs(diffs), axis=0)
+        elif t.device:
+            diffs = cp.stack(diffs, axis=0)
+            closest_segment = cp.argmin(cp.abs(diffs), axis=0)
+        else:
+            diffs = np.stack(diffs, axis=0)
+            closest_segment = np.argmin(np.abs(diffs), axis=0)
         return closest_segment
 
     def covers(self, t):
