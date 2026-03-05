@@ -58,7 +58,7 @@ class ChannelizedModel:
             chunks = da.core.normalize_chunks(chunks, shape=shape, dtype=dtype)
             chunk_sizes = list(nchan*chunk for chunk in chunks[1])
             chunk_sizes[0] += nlag
-            chunks_baseband = (tuple(chunk_sizes),)
+            chunks_baseband = (tuple(chunk_sizes), (2,))
 
         if t_start is None:
             t_start = self.baseband_model.predictor.epoch

@@ -28,7 +28,10 @@ class PolyphaseFilterbank:
         h = np.ones(t.shape, dtype=np.result_type(t, 1j))
         h *= np.sinc(t)
         if shift:
-            h *= np.exp(1j*(self.nchan-1)*np.pi*t)
+            if nchan % 2 == 0:
+                h *= np.exp(-1j*self.nchan*np.pi*t)
+            else:
+                h *= np.exp(-1j*(self.nchan-1)*np.pi*t)
         h *= signal.get_window(self.window, self.ntap*self.nchan)
         self.filter_coeffs = h.reshape(ntap, nchan)
 
@@ -43,7 +46,7 @@ class PolyphaseFilterbank:
         T = self.nchan/self.bandwidth
         t = np.linspace(-T/2*self.ntap, T/2*self.ntap, self.ntap*self.nchan, endpoint=False)
         f = np.linspace(-self.bandwidth/2, self.bandwidth/2, n_freq)
-        x = np.exp(2j*np.pi*f[:, np.newaxis]*t).reshape(-1, self.ntap, self.nchan)
+        x = np.exp(-2j*np.pi*f[:, np.newaxis]*t).reshape(-1, self.ntap, self.nchan)
         x_fold = np.sum(x*self.filter_coeffs, axis=1)
         x_pfb = np.fft.fft(x_fold, axis=1)
         spec = np.abs(x_pfb/self.nchan)
@@ -117,12 +120,7 @@ class PolyphaseFilterbank:
         channelized_data: ChannelizedData object
         """
         bw = data.bandwidth
-        if self.shift:
-            df = bw/self.nchan
-            freqs = np.linspace(-(bw - df)/2, (bw - df)/2, self.nchan)
-        else:
-            freqs = np.linspace(-bw/2, bw/2, self.nchan, endpoint=False)
-            #freqs = fft.fftshift(fft.fftfreq(nchan, d=1/data.bandwidth))
+        freqs = np.fft.fftshift(np.fft.fftfreq(self.nchan, d=1/data.bandwidth))
         freqs += data.obsfreq
         if data.obsfreq != self.obsfreq or data.bandwidth != self.bandwidth:
             raise ValueError(f"Data observing frequency ({data.obsfreq} Hz) "
