@@ -50,20 +50,19 @@ class ChannelizedModel:
         """
         nchan = self.filterbank.nchan
         nlag = nchan*(self.filterbank.ntap - 1)
-        n_baseband = nchan*n_samples + nlag
+        n_baseband = nchan*n_samples
 
         delayed = isinstance(rng, DelayedRNG)
         if delayed:
             shape = (nchan, n_samples)
             chunks = da.core.normalize_chunks(chunks, shape=shape, dtype=dtype)
             chunk_sizes = list(nchan*chunk for chunk in chunks[1])
-            chunk_sizes[0] += nlag
             chunks_baseband = (tuple(chunk_sizes), (2,))
 
         if t_start is None:
             t_start = self.baseband_model.predictor.epoch
 
-        offset = t_start.offset - nlag/self.baseband_model.bandwidth
+        offset = t_start.offset
         t_start = Time(t_start.mjd, t_start.second, offset)
         kwargs = {}
         if delayed:
