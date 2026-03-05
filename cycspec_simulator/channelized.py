@@ -156,6 +156,7 @@ class ChannelizedData:
         use_cuda=have_cuda,
         use_warpagg=False,
         n_threads=nb.config.NUMBA_NUM_THREADS,
+        compute=True,
     ):
         """
         Compute the periodic spectrum from channelized data.
@@ -166,57 +167,51 @@ class ChannelizedData:
         nbin: Number of phase bins in which to accumulate
         predictor: `PhasePredictor` object to use in computing phases.
         use_cuda: Whether to use CUDA acceleration. Defaults to True if a CUDA
-                  device is detected by CuPy. Otherwise defaults to False.
+            device is detected by CuPy. Otherwise defaults to False.
         n_threads: Number of CPU threads to use. Defaults to the total number of
-                   CPUs, as detected by Numba. Has no effect if use_gpu is True.
+            CPUs, as detected by Numba. Has no effect if use_gpu is True.
+        compute: If data are delayed, invoke Dask to compute the output.
+            Otherwise, has no effect.
         """
         if use_cuda and have_cuda:
             cycfold = partial(cycfold_gpu, use_warpagg=use_warpagg)
-            cycfold_kwargs = {}
         elif use_cuda:
             err = ValueError("use_cuda was specified, but no CUDA device was found")
             raise err
         else:
-            cycfold = cycfold_cpu
-            cycfold_kwargs = {'n_threads': n_threads}
+            cycfold = partial(cycfold_cpu, n_threads=n_threads)
 
-        freq = np.zeros(ncyc*self.nchan)
-        I = np.zeros((ncyc*self.nchan, nbin))
-        Q = np.zeros((ncyc*self.nchan, nbin))
-        U = np.zeros((ncyc*self.nchan, nbin))
-        V = np.zeros((ncyc*self.nchan, nbin))
-        chan_data = self.extract_channel(0)
-        pspec = cycfold(chan_data, ncyc, nbin, predictor, **cycfold_kwargs)
-        if self.nchan % 2 == 0:
-            bot = slice(0, ncyc - ncyc//2)
-            top = slice(-ncyc//2, None)
-            freq[top] = pspec.freq[:ncyc//2] + self.bandwidth
-            freq[bot] = pspec.freq[ncyc//2:]
-            I[top] = pspec.I[:ncyc//2]
-            I[bot] = pspec.I[ncyc//2:]
-            Q[top] = pspec.Q[:ncyc//2]
-            Q[bot] = pspec.Q[ncyc//2:]
-            U[top] = pspec.U[:ncyc//2]
-            U[bot] = pspec.U[ncyc//2:]
-            V[top] = pspec.V[:ncyc//2]
-            V[bot] = pspec.V[ncyc//2:]
-            start = 1
-            offs = -ncyc//2
-            logger.info("Even case")
-        else:
-            start = 0
-            offs = 0
-            logger.info("Odd case")
-        for ichan in range(start, self.nchan):
+        pspec_chan = []
+        for ichan in range(self.nchan):
             chan_data = self.extract_channel(ichan)
-            pspec = cycfold(chan_data, ncyc, nbin, predictor, **cycfold_kwargs)
-            sl = slice(ichan*ncyc + offs, (ichan + 1)*ncyc + offs)
-            freq[sl] = pspec.freq
-            I[sl] = pspec.I
-            Q[sl] = pspec.Q
-            U[sl] = pspec.U
-            V[sl] = pspec.V
-        return PeriodicSpectrum(freq, self.start_time, I, Q, U, V)
+            pspec_chan.append(cycfold(chan_data, ncyc, nbin, predictor, compute=False))
+        samples = sum(pspec.samples for pspec in pspec_chan)
+        elapsed = sum(pspec.elapsed for pspec in pspec_chan)
+
+        if self.delayed:
+            fft = da.fft
+            concatenate = da.concatenate
+            roll = da.roll
+        else:
+            fft = np.fft
+            concatenate = np.concatenate
+            roll = np.roll
+
+        freq = fft.fftshift(fft.fftfreq(self.nchan*ncyc, 1/self.bandwidth))
+        I = concatenate([pspec.I for pspec in pspec_chan], axis=0)
+        Q = concatenate([pspec.Q for pspec in pspec_chan], axis=0)
+        U = concatenate([pspec.U for pspec in pspec_chan], axis=0)
+        V = concatenate([pspec.V for pspec in pspec_chan], axis=0)
+        if self.nchan % 2 == 0:
+            I = roll(I, -ncyc//2, axis=0)
+            Q = roll(Q, -ncyc//2, axis=0)
+            U = roll(U, -ncyc//2, axis=0)
+            V = roll(V, -ncyc//2, axis=0)
+
+        result = PeriodicSpectrum(freq, self.start_time, I, Q, U, V, samples, elapsed)
+        if compute:
+            result = result.compute()
+        return result
 
     def fold(self, nbin, predictor):
         phi = predictor.phase(self.t)

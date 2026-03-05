@@ -233,7 +233,16 @@ def corrfold_gpu(A, B, nlag, nbin, binplan, stream, include_end=False, use_warpa
 
     return AA, BB, CR, CI, samples, elapsed
 
-def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=None, use_warpagg=False):
+def cycfold_gpu(
+    data,
+    ncyc,
+    nbin,
+    phase_predictor,
+    include_end=False,
+    n_workers=None,
+    use_warpagg=False,
+    compute=True,
+):
     """
     Compute the periodic spectrum from sampled data, using CUDA.
 
@@ -247,6 +256,8 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=
           corresponding array of phases.
     include_end: Passed along to corrfold_gpu(), see there for details.
     use_warpagg: Use the optimized kernel with warp aggregated atomic adds.
+    compute: If data are delayed, invoke Dask to compute the output.
+          Otherwise, has no effect.
     """
     complex_dtype = data.A.dtype
     logger.debug(f"Input dtype: {complex_dtype}")
@@ -294,13 +305,14 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=
         CI = da.mean(da.stack(CI), axis=0)
         samples = da.sum(da.stack(samples), axis=0)
         elapsed = da.sum(da.stack(elapsed), axis=0)
-        AA, BB, CR, CI, samples, elapsed = dask.compute(
-            AA, BB, CR, CI, samples, elapsed, num_workers=n_workers
-        )
-        logger.info(f"Total products accumulated: {4*np.sum(samples)}")
-        logger.info(f"Elapsed time in kernel: {elapsed:g} ms")
-        throughput = 4*np.sum(samples)/(elapsed/1000)
-        logger.info(f"Throughput: {throughput:g} products/sec.")
+        if compute:
+            AA, BB, CR, CI, samples, elapsed = dask.compute(
+                AA, BB, CR, CI, samples, elapsed, num_workers=n_workers
+            )
+            logger.info(f"Total products accumulated: {4*np.sum(samples)}")
+            logger.info(f"Elapsed time in kernel: {elapsed:g} ms")
+            throughput = 4*np.sum(samples)/(elapsed/1000)
+            logger.info(f"Throughput: {throughput:g} products/sec.")
     else:
         logger.debug("Computing directly, not delayed")
         AA, BB, CR, CI, samples, elapsed = corrfold_gpu(
@@ -312,13 +324,19 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=
         logger.info(f"Throughput: {throughput:g} products/sec.")
     cuda.profile_stop()
 
-    pspec_AA = np.fft.fftshift(np.fft.hfft(AA.get(), axis=0), axes=0)
+    if hasattr(AA, 'get'):
+        AA = AA.get()
+        BB = BB.get()
+        CR = CR.get()
+        CI = CI.get()
+
+    pspec_AA = np.fft.fftshift(np.fft.hfft(AA, axis=0), axes=0)
     pspec_AA = pspec_AA.reshape(ncyc, nbin)
-    pspec_BB = np.fft.fftshift(np.fft.hfft(BB.get(), axis=0), axes=0)
+    pspec_BB = np.fft.fftshift(np.fft.hfft(BB, axis=0), axes=0)
     pspec_BB = pspec_BB.reshape(ncyc, nbin)
-    pspec_CR = np.fft.fftshift(np.fft.hfft(CR.get(), axis=0), axes=0)
+    pspec_CR = np.fft.fftshift(np.fft.hfft(CR, axis=0), axes=0)
     pspec_CR = pspec_CR.reshape(ncyc, nbin)
-    pspec_CI = np.fft.fftshift(np.fft.hfft(CI.get(), axis=0), axes=0)
+    pspec_CI = np.fft.fftshift(np.fft.hfft(CI, axis=0), axes=0)
     pspec_CI = pspec_CI.reshape(ncyc, nbin)
     bandwidth = data.bandwidth
     freq = data.obsfreq + np.linspace(-bandwidth/2, bandwidth/2, ncyc, endpoint=False)
@@ -330,5 +348,5 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=
         pspec_CI,
         data.feed_poln,
     )
-    pspec = PeriodicSpectrum(freq, data.start_time, I, Q, U, V)
+    pspec = PeriodicSpectrum(freq, data.start_time, I, Q, U, V, samples, elapsed)
     return pspec

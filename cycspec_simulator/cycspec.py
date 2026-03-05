@@ -12,7 +12,7 @@ from .plot_helpers import symmetrize_limits
 from .time import Time
 
 class PeriodicSpectrum:
-    def __init__(self, freq, start_time, I, Q=None, U=None, V=None):
+    def __init__(self, freq, start_time, I, Q=None, U=None, V=None, samples=None, elapsed=None):
         """
         Create a new peiodic spectrum from frequency, I, Q, U, and V arrays.
         If one of Q, U, or V is present, all must be present with the same shape.
@@ -27,8 +27,35 @@ class PeriodicSpectrum:
             self.U = U
             self.V = V
 
+        self.samples = samples
+        self.elapsed = elapsed
+
         self.nbin = self.shape[-1]
         self.phase = np.linspace(0, 1, self.nbin, endpoint=False)
+
+    @property
+    def delayed(self):
+        return isinstance(self.I, da.Array)
+
+    def compute(self, n_workers=None):
+        if self.delayed:
+            I, Q, U, V, samples, elapsed = dask.compute(
+                self.I, self.Q, self.U, self.V, self.samples, self.elapsed,
+                num_workers=n_workers,
+            )
+            if hasattr(I, 'get'):
+                # transfer CuPy arrays to CPU
+                I = I.get()
+                Q = Q.get()
+                U = U.get()
+                V = V.get()
+            logger.info(f"Total products accumulated: {4*np.sum(samples)}")
+            logger.info(f"Elapsed time: {elapsed:g} ms")
+            throughput = 4*np.sum(samples)/(elapsed/1000)
+            logger.info(f"Throughput: {throughput:g} products/sec.")
+            return PeriodicSpectrum(self.freq, self.start_time, I, Q, U, V, samples, elapsed)
+        else:
+            return self
 
     def plot(self, ax=None, what='I', shift=0.0, sym_lim=False, vmin=None, vmax=None,
              **kwargs):
@@ -45,15 +72,20 @@ class PeriodicSpectrum:
 
         Additional keyword arguments are passed on to ax.pcolormesh().
         """
+        if self.delayed:
+            spec = self.compute()
+        else:
+            spec = self
+
         if ax is None:
             fig = plt.figure()
             ax = fig.add_subplot()
 
-        arr = getattr(self, what)
-        arr = fft_roll(arr, shift*self.nbin)
+        arr = getattr(spec, what)
+        arr = fft_roll(arr, shift*spec.nbin)
         if sym_lim:
             vmin, vmax = symmetrize_limits(arr, vmin, vmax)
-        pc = ax.pcolormesh(self.phase - shift, self.freq/1e6, arr, vmin=vmin, vmax=vmax, **kwargs)
+        pc = ax.pcolormesh(spec.phase - shift, spec.freq/1e6, arr, vmin=vmin, vmax=vmax, **kwargs)
         ax.set_xlabel('Phase (cycles)')
         ax.set_ylabel('Frequency (MHz)')
 
@@ -167,8 +199,16 @@ def corrfold_cpu(A, B, nlag, nbin, binplan, include_end=False,
 
     return AA, BB, CR, CI, samples, elapsed
 
-def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
-                n_threads=nb.config.NUMBA_NUM_THREADS, n_workers=None):
+def cycfold_cpu(
+    data,
+    ncyc,
+    nbin,
+    phase_predictor,
+    include_end=False,
+    n_threads=nb.config.NUMBA_NUM_THREADS,
+    n_workers=None,
+    compute=True,
+):
     """
     Compute the periodic spectrum from sampled data.
 
@@ -183,6 +223,8 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
     include_end: Passed along to corrfold_cpu(), see there for details.
     n_threads: Number of CPU threads to use. Defaults to the total number of
           available CPUs, as detected by Numba.
+    compute: If data are delayed, invoke Dask to compute the output.
+          Otherwise, has no effect.
     """
     complex_dtype = data.A.dtype
     logger.debug(f"Input dtype: {complex_dtype}")
@@ -228,13 +270,14 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
         CI = da.mean(da.stack(CI), axis=0)
         samples = da.sum(da.stack(samples), axis=0)
         elapsed = da.sum(da.stack(elapsed), axis=0)
-        AA, BB, CR, CI, samples, elapsed = dask.compute(
-            AA, BB, CR, CI, samples, elapsed, num_workers=n_workers,
-        )
-        logger.info(f"Total products accumulated: {4*np.sum(samples)}")
-        logger.info(f"Elapsed time in numba: {elapsed:g} ms")
-        throughput = 4*np.sum(samples)/(elapsed/1000)
-        logger.info(f"Throughput: {throughput:g} products/sec.")
+        if compute:
+            AA, BB, CR, CI, samples, elapsed = dask.compute(
+                AA, BB, CR, CI, samples, elapsed, num_workers=n_workers,
+            )
+            logger.info(f"Total products accumulated: {4*np.sum(samples)}")
+            logger.info(f"Elapsed time in numba: {elapsed:g} ms")
+            throughput = 4*np.sum(samples)/(elapsed/1000)
+            logger.info(f"Throughput: {throughput:g} products/sec.")
     else:
         AA, BB, CR, CI, samples, elapsed = corrfold_cpu(
             data.A, data.B, nlag, nbin, binplan, include_end
@@ -257,5 +300,5 @@ def cycfold_cpu(data, ncyc, nbin, phase_predictor, include_end=False,
         pspec_CI,
         data.feed_poln,
     )
-    pspec = PeriodicSpectrum(freq, data.start_time, I, Q, U, V)
+    pspec = PeriodicSpectrum(freq, data.start_time, I, Q, U, V, samples, elapsed)
     return pspec
