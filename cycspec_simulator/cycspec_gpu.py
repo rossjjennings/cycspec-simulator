@@ -9,7 +9,6 @@ from loguru import logger
 from .polarization import coherence_to_stokes
 from .time import Time
 from .cycspec import PeriodicSpectrum
-from .gpu import get_current_device
 
 class CUDATimer:
     """
@@ -34,7 +33,9 @@ class CUDATimer:
         self.elapsed = self.event_begin.elapsed_time(self.event_end)
 
 @cuda.jit()
-def corrfold_kernel(A, B, nbin, binplan, n_samples, AA, AB, BA, BB, include_end=False):
+def corrfold_kernel(A, B, nbin, binplan, n_samples,
+                    AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag,
+                    include_end=False):
     """
     Compute the cyclic autocorrelation function from sampled data, using CUDA.
     This CUDA kernel is intended to be used internally by cycfold_gpu().
@@ -47,38 +48,39 @@ def corrfold_kernel(A, B, nbin, binplan, n_samples, AA, AB, BA, BB, include_end=
           (length 2*n - 1, where n is the number of samples)
     n_samples: Output array which will be used to hold the number of samples
           accumulated into each phase bin for each lag.
-    AA, AB, BA, BB: Output arrays which will be used to hold each of the polarization
+    AA_real, etc.: Output arrays which will be used to hold each of the polarization
           components of the result, for both real and imaginary part.
-          These should have shape (nbin, nlag, 2), where the last axis (of length 2)
-          will hold the real and imaginary part at index 0 and 1, respectively.
     include_end: Whether to calculate products where the first sample is among
           the last nlag - ilag - 1 samples. In such cases, there are fewer than
           nlag choices for the second sample. Setting include_end=True means that
           slightly more samples will contribute to lower lags.
     """
-    ithread, ilag = cuda.grid(2)
-    nthreads, nlag = cuda.gridsize(2)
+    ilag = cuda.blockIdx.x
+    nlag = cuda.gridDim.x
+    ithread = cuda.threadIdx.x
+    nthreads = cuda.blockDim.x
 
     if include_end:
-        ncorr = A.shape[0] - ilag
+        ncorr = A.size - ilag
     else:
-        ncorr = A.shape[0] - nlag + 1
+        ncorr = A.size - nlag + 1
 
     for icorr in range(ithread, ncorr, nthreads):
         ibin = binplan[2*icorr + ilag]
-        cuda.atomic.add(n_samples, (ilag, ibin), 1)
+        ibuf = ilag*nbin + ibin
+        cuda.atomic.add(n_samples, ibuf, 1)
         product_AA = (A[icorr + ilag] * A[icorr].conjugate())
-        cuda.atomic.add(AA, (ilag, ibin, 0), product_AA.real)
-        cuda.atomic.add(AA, (ilag, ibin, 1), product_AA.imag)
+        cuda.atomic.add(AA_real, ibuf, product_AA.real)
+        cuda.atomic.add(AA_imag, ibuf, product_AA.imag)
         product_AB = (A[icorr + ilag] * B[icorr].conjugate())
-        cuda.atomic.add(AB, (ilag, ibin, 0), product_AB.real)
-        cuda.atomic.add(AB, (ilag, ibin, 1), product_AB.imag)
+        cuda.atomic.add(AB_real, ibuf, product_AB.real)
+        cuda.atomic.add(AB_imag, ibuf, product_AB.imag)
         product_BA = (B[icorr + ilag] * A[icorr].conjugate())
-        cuda.atomic.add(BA, (ilag, ibin, 0), product_BA.real)
-        cuda.atomic.add(BA, (ilag, ibin, 1), product_BA.imag)
+        cuda.atomic.add(BA_real, ibuf, product_BA.real)
+        cuda.atomic.add(BA_imag, ibuf, product_BA.imag)
         product_BB = (B[icorr + ilag] * B[icorr].conjugate())
-        cuda.atomic.add(BB, (ilag, ibin, 0), product_BB.real)
-        cuda.atomic.add(BB, (ilag, ibin, 1), product_BB.imag)
+        cuda.atomic.add(BB_real, ibuf, product_BB.real)
+        cuda.atomic.add(BB_imag, ibuf, product_BB.imag)
 
 @cuda.jit(device=True)
 def warpagg_add_pair(arr, indices, val1, val2):
@@ -188,23 +190,20 @@ def corrfold_gpu(A, B, nlag, nbin, binplan, stream, include_end=False, use_warpa
     A_gpu = cupy.array(A)
     B_gpu = cupy.array(B)
     binplan = cupy.array(binplan)
-    samples = cupy.zeros((nlag, nbin), dtype=np.int32)
-    # last dimension of length 2 is for real/imaginary part
-    AA = cupy.zeros((nlag, nbin, 2), dtype=real_dtype)
-    AB = cupy.zeros((nlag, nbin, 2), dtype=real_dtype)
-    BA = cupy.zeros((nlag, nbin, 2), dtype=real_dtype)
-    BB = cupy.zeros((nlag, nbin, 2), dtype=real_dtype)
+    samples = cupy.zeros(nlag*nbin, dtype=np.int32)
+    AA_real = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    AA_imag = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    AB_real = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    AB_imag = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    BA_real = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    BA_imag = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    BB_real = cupy.zeros(nlag*nbin, dtype=real_dtype)
+    BB_imag = cupy.zeros(nlag*nbin, dtype=real_dtype)
 
-    # Determine grid size to use based on device attributes
-    device = get_current_device()
-    blocksize = np.gcd(device.max_threads_per_block, device.max_threads_per_multiprocessor)
-    blocksize = int(blocksize)
-    in_samples, = A.shape
-    # Target 32 blocks per multiprocessor for good measure
-    nblocks_target = device.multiprocessor_count * 32
-    nblocks_span = int(np.ceil(in_samples/blocksize))
-    nblocks = min(int(np.ceil(nblocks_target/nlag)), nblocks_span)
-    logger.debug(f"Launching grid with gridsize {(nblocks, nlag)} and blocksize {(blocksize, 1)}")
+    # Number of threads per CUDA thread block.
+    # Turing has 1024 threads per SM, Ampere has 1536. 512 is the gcd of these,
+    # so should make it possible to achieve full occupancy on either.
+    nthreads_block = 512
 
     with CUDATimer(stream) as cudatimer:
         if use_warpagg:
@@ -212,16 +211,22 @@ def corrfold_gpu(A, B, nlag, nbin, binplan, stream, include_end=False, use_warpa
                 A_gpu, B_gpu, nbin, binplan, samples, AA, AB, BA, BB, include_end,
             )
         else:
-            corrfold_kernel[(nblocks, nlag), (blocksize, 1), stream](
-                A_gpu, B_gpu, nbin, binplan, samples, AA, AB, BA, BB, include_end,
+            corrfold_kernel[nlag, nthreads_block, stream](
+                A_gpu, B_gpu, nbin, binplan, samples,
+                AA_real, AA_imag, AB_real, AB_imag, BA_real, BA_imag, BB_real, BB_imag,
+                include_end
             )
     elapsed = np.array(cudatimer.elapsed, dtype=np.float64)
 
     i = cupy.array(1j, dtype=complex_dtype)
-    AA = (AA[..., 0] + i*AA[..., 1])/samples
-    BB = (BB[..., 0] + i*BB[..., 1])/samples
-    CR = (AB[..., 0] + BA[..., 0] + i*(AB[..., 1] + BA[..., 1]))/(2*samples)
-    CI = (AB[..., 0] - BA[..., 0] + i*(AB[..., 1] - BA[..., 1]))/(2*i*samples)
+    AA = (AA_real + i*AA_imag)/samples
+    AA = AA.reshape(nlag, nbin)
+    BB = (BB_real + i*BB_imag)/samples
+    BB = BB.reshape(nlag, nbin)
+    CR = (AB_real + BA_real + i*(AB_imag + BA_imag))/(2*samples)
+    CR = CR.reshape(nlag, nbin)
+    CI = (AB_real - BA_real + i*(AB_imag - BA_imag))/(2*i*samples)
+    CI = CI.reshape(nlag, nbin)
     samples = samples.reshape(nlag, nbin)
 
     return AA, BB, CR, CI, samples, elapsed
