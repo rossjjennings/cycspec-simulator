@@ -9,6 +9,7 @@ from loguru import logger
 from .polarization import coherence_to_stokes
 from .time import Time
 from .cycspec import PeriodicSpectrum
+from .gpu import get_current_device
 
 class CUDATimer:
     """
@@ -61,10 +62,11 @@ def corrfold_kernel(A, B, nbin, binplan, n_samples, AA, AB, BA, BB, include_end=
     nthreads = cuda.blockDim.x
 
     if include_end:
-        ncorr = A.size - ilag
+        ncorr = A.shape[0] - ilag
     else:
-        ncorr = A.size - nlag + 1
+        ncorr = A.shape[0] - nlag + 1
 
+    # grid-stride loop
     for icorr in range(ithread, ncorr, nthreads):
         ibin = binplan[2*icorr + ilag]
         cuda.atomic.add(n_samples, (ilag, ibin), 1)
@@ -143,14 +145,17 @@ def corrfold_kernel_warpagg(A, B, nbin, binplan, n_samples, AA, AB, BA, BB, incl
           nlag choices for the second sample. Setting include_end=True means that
           slightly more samples will contribute to lower lags.
     """
-    ithread, ilag = cuda.grid(2)
-    nthreads, nlag = cuda.gridsize(2)
+    ilag = cuda.blockIdx.x
+    nlag = cuda.gridDim.x
+    ithread = cuda.threadIdx.x
+    nthreads = cuda.blockDim.x
 
     if include_end:
         ncorr = A.shape[0] - ilag
     else:
         ncorr = A.shape[0] - nlag + 1
 
+    # grid-stride loop
     for icorr in range(ithread, ncorr, nthreads):
         ibin = binplan[2*icorr + ilag]
         warpagg_add_count(n_samples, (ilag, ibin))
@@ -195,18 +200,26 @@ def corrfold_gpu(A, B, nlag, nbin, binplan, stream, include_end=False, use_warpa
     BA = cupy.zeros((nlag, nbin, 2), dtype=real_dtype)
     BB = cupy.zeros((nlag, nbin, 2), dtype=real_dtype)
 
-    # Number of threads per CUDA thread block.
-    # Turing has 1024 threads per SM, Ampere has 1536. 512 is the gcd of these,
-    # so should make it possible to achieve full occupancy on either.
-    nthreads_block = 512
+    # Determine block size to use based on device attributes
+    device = get_current_device()
+    blocksize = np.gcd(device.max_threads_per_block, device.max_threads_per_multiprocessor)
+    logger.debug(f"Using blocksize {blocksize}")
+
+    # Determine number of blocks, targeting 32 per multiprocessor
+    in_samples, = A.shape
+    nblocks_target = device.multiprocessor_count * 32
+    nblocks_span = int(np.ceil(in_samples/blocksize))
+    nblocks = min(int(np.ceil(nblocks_target/nlag)), nblocks_span)
+    logger.debug(f"Number of lags: {nlag}")
+    logger.debug(f"Number of blocks per lag for full occupancy: {nblocks}")
 
     with CUDATimer(stream) as cudatimer:
         if use_warpagg:
-            corrfold_kernel_warpagg[(nblocks, nlag), (blocksize, 1), stream](
+            corrfold_kernel_warpagg[nlag, blocksize, stream](
                 A_gpu, B_gpu, nbin, binplan, samples, AA, AB, BA, BB, include_end,
             )
         else:
-            corrfold_kernel[nlag, nthreads_block, stream](
+            corrfold_kernel[nlag, blocksize, stream](
                 A_gpu, B_gpu, nbin, binplan, samples, AA, AB, BA, BB, include_end,
             )
     elapsed = np.array(cudatimer.elapsed, dtype=np.float64)
@@ -259,6 +272,7 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=
     stream = cuda.stream()
     cuda.profile_start()
     if data.delayed:
+        logger.debug("Computing using Dask delayed")
         A = da.overlap.overlap(data.A, depth={0: (0, nlag - 1)}, boundary=None)
         B = da.overlap.overlap(data.B, depth={0: (0, nlag - 1)}, boundary=None)
         binplan = da.overlap.overlap(binplan, depth={0: (0, 2*nlag - 2)}, boundary=None)
@@ -288,6 +302,7 @@ def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=
         throughput = 4*np.sum(samples)/(elapsed/1000)
         logger.info(f"Throughput: {throughput:g} products/sec.")
     else:
+        logger.debug("Computing directly, not delayed")
         AA, BB, CR, CI, samples, elapsed = corrfold_gpu(
             data.A, data.B, nlag, nbin, binplan, stream, include_end, use_warpagg,
         )
