@@ -297,7 +297,7 @@ class BasebandData:
         else:
             return self
 
-    def cycfold(self, nchan, nbin, predictor, use_cuda=have_cuda, use_warpagg=True,
+    def cycfold(self, nchan, nbin, predictor, use_cuda=have_cuda, use_warpagg=False,
                 n_threads=nb.config.NUMBA_NUM_THREADS, n_workers=None):
         """
         Compute the periodic spectrum from baseband data.

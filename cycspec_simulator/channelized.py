@@ -3,6 +3,7 @@ import numba as nb
 import dask
 import dask.array as da
 from loguru import logger
+from functools import partial
 
 from .baseband import BasebandData, DelayedRNG, get_time_axis
 from .interpolation import lerp
@@ -147,8 +148,15 @@ class ChannelizedData:
     def __getitem__(self, ichan):
         return self.extract_channel(ichan)
 
-    def cycfold(self, ncyc, nbin, predictor, use_cuda=have_cuda,
-                   n_threads=nb.config.NUMBA_NUM_THREADS):
+    def cycfold(
+        self,
+        ncyc,
+        nbin,
+        predictor,
+        use_cuda=have_cuda,
+        use_warpagg=False,
+        n_threads=nb.config.NUMBA_NUM_THREADS,
+    ):
         """
         Compute the periodic spectrum from channelized data.
 
@@ -163,7 +171,7 @@ class ChannelizedData:
                    CPUs, as detected by Numba. Has no effect if use_gpu is True.
         """
         if use_cuda and have_cuda:
-            cycfold = cycfold_gpu
+            cycfold = partial(cycfold_gpu, use_warpagg=use_warpagg)
             cycfold_kwargs = {}
         elif use_cuda:
             err = ValueError("use_cuda was specified, but no CUDA device was found")

@@ -226,7 +226,7 @@ def corrfold_gpu(A, B, nlag, nbin, binplan, stream, include_end=False, use_warpa
 
     return AA, BB, CR, CI, samples, elapsed
 
-def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=None, use_warpagg=True):
+def cycfold_gpu(data, ncyc, nbin, phase_predictor, include_end=False, n_workers=None, use_warpagg=False):
     """
     Compute the periodic spectrum from sampled data, using CUDA.
 
