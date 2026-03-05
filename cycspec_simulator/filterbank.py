@@ -157,8 +157,10 @@ class PolyphaseFilterbank:
             )
             start_time = start_time.compute()
         else:
-            A = process_block(data.A)
-            B = process_block(data.B)
+            A = data.A[:ns_chan*self.nchan].reshape((ns_chan, self.nchan))
+            B = data.B[:ns_chan*self.nchan].reshape((ns_chan, self.nchan))
+            A = process_block(A)
+            B = process_block(B)
         return ChannelizedData(
             A.T, B.T,
             start_time=start_time,
