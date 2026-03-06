@@ -86,7 +86,7 @@ def corrfold_kernel(A, B, nbin, binplan, n_samples, AA, AB, BA, BB, include_end=
 @cuda.jit(device=True)
 def warpagg_add_pair(arr, indices, val1, val2):
     # create mask of all peer threads with higher laneid
-    ravel_index = indices[0]*arr.shape[0] + arr.shape[1]
+    ravel_index = indices[0]*arr.shape[0] + indices[1]
     mask = cuda.match_any_sync(cuda.activemask(), ravel_index) & cuda.activemask()
     upper = mask & (~((2<<cuda.laneid) - 1))
 
@@ -112,7 +112,7 @@ def warpagg_add_pair(arr, indices, val1, val2):
 @cuda.jit(device=True)
 def warpagg_add_count(arr, indices):
     # create mask of all peer threads with higher laneid
-    ravel_index = indices[0]*arr.shape[0] + arr.shape[1]
+    ravel_index = indices[0]*arr.shape[0] + indices[1]
     mask = cuda.match_any_sync(cuda.activemask(), ravel_index) & cuda.activemask()
 
     # no need to do a complex warp reduction when `popc()` will do
@@ -126,7 +126,8 @@ def corrfold_kernel_warpagg(A, B, nbin, binplan, n_samples, AA, AB, BA, BB, incl
     """
     Compute the cyclic autocorrelation function from sampled data, using CUDA.
     This CUDA kernel is intended to be used internally by cycfold_gpu().
-    This version is optimized using warp aggregation.
+    This version aggregates atomic adds across a warp, which leads to fewer
+    atomic adds and, in theory, less write contention.
 
     Parameters
     ----------
