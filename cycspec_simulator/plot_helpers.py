@@ -16,7 +16,7 @@ def symmetrize_limits(data, vmin=None, vmax=None):
     vmin, vmax = -lim, lim
     return vmin, vmax
 
-def phase_intensity_colorbar(
+def complex_colorbar(
     fig,
     ax,
     cax=None,

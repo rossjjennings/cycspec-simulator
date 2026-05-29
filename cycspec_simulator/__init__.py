@@ -10,6 +10,7 @@ from .time import Time
 from .metadata import ObservingMetadata
 from .filterbank import PolyphaseFilterbank
 from .channelized import ChannelizedModel
+from .plot_helpers import symmetrize_limits, complex_colorbar
 from .gpu import have_cuda
 if have_cuda:
     from .cycspec_gpu import cycfold_gpu
