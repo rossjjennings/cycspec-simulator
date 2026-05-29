@@ -8,15 +8,16 @@ dynamic = ["version"]
 authors = [
     {name = "Ross Jennings", email = "ross.jennings@nanograv.org"},
 ]
-requires-python = ">=3.9" # required by numba 0.57
+requires-python = ">=3.11"
 dependencies = [
-    "numpy>=1.21.6", # required by numba 0.57
-    "scipy>=1.5.3",
-    "matplotlib>=3.3.3",
-    "astropy>=4.0.4",
+    "numpy>=1.23.2",
+    "scipy>=1.9.2",
+    "matplotlib>=3.6.0",
+    "astropy>=5.1.1",
     "numba>=0.57.0", # needed to compile multiple signatures for GPU
     "dask>=2023.2.1", # needed for dask.array.random.default_rng()
-    "loguru",
+    "loguru>=0.7.0",
+    "cmocean",
 ]
 
 [project.optional-dependencies]
@@ -36,3 +37,29 @@ versionfile_source = "cycspec_simulator/_version.py"
 versionfile_build = "cycspec_simulator/_version.py"
 tag_prefix = "v"
 parentdir_prefix = "cycspec-simulator-"
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.dependencies]
+numpy = ">=1.23.2"
+scipy = ">=1.9.2"
+matplotlib = ">=3.6.0"
+astropy = ">=5.1.1"
+numba = ">=0.57.0"
+dask = ">=2023.2.1"
+loguru = ">=0.7.0"
+cmocean = "*"
+
+[tool.pixi.environments]
+default = {features = ["ipykernel"]}
+
+[tool.pixi.feature.ipykernel.dependencies]
+ipython = "*"
+ipykernel = ">=6.22.0,<7" # v7 leads to weird plot issues with numba
+ipympl = ">=0.10.0"
+
+[tool.pixi.feature.cuda.dependencies]
+cupy = "*"
+cuda-python = "*"
