@@ -8,13 +8,84 @@ from loguru import logger
 
 from .interpolation import fft_roll
 from .polarization import validate_stokes, coherence_to_stokes
-from .plot_helpers import symmetrize_limits
+from .plot_helpers import symmetrize_limits, complex_colorbar
 from .time import Time
+
+class CyclicSpectrum:
+    def __init__(self, freq, start_time, nbin, I, Q=None, U=None, V=None):
+        """
+        Create a new cyclic spectrum from frequency, I, Q, U, and V arrays.
+        If one of Q, U, or V is present, all must be present with the same shape.
+        """
+        self.freq = freq
+        self.start_time = start_time
+        self.nbin = nbin
+
+        self.full_stokes, self.shape = validate_stokes(I, Q, U, V)
+        self.I = I
+        if self.full_stokes:
+            self.Q = Q
+            self.U = U
+            self.V = V
+
+        self.nharm = nbin//2 + 1
+        self.cycle_harmonic = np.fft.rfftfreq(nbin, d=1/nbin)
+
+    def plot(
+        self,
+        ax=None,
+        cax=None,
+        what='I',
+        phasecmap='cmo.phase',
+        gamma=1.,
+        **kwargs,
+    ):
+        """
+        Plot the cyclic spectrum using domain coloring.
+
+        Parameters
+        ----------
+        ax: Axes on which to plot the cyclic spectrum.
+            If `None`, a new Figure and Axes will be created.
+        cax: Axes on which to plot the colorbar. If `None`, a new Axes
+            object will be created and automatically placed.
+        what: Which Stokes parameter to plot: 'I', 'Q', 'U', or 'V'.
+            Ignored if spectrum only has total intensity data.
+        phasecmap: Colormap used to determine the color for each phase.
+            Defaults to the perceptually uniform cmocean "phase" colormap.
+        gamma:
+
+        Additional keyword arguments are passed on to `ax.pcolormesh()`.
+
+        Returns
+        -------
+        pc: QuadMesh Artist created by `ax.pcolormesh()`.
+        """
+        if ax is None:
+            fig = plt.figure()
+            ax = fig.add_subplot()
+
+        arr = getattr(self, what)
+        vlim = np.max(np.abs(arr))
+        pc = ax.pcolormesh(
+            self.cycle_harmonic,
+            self.freq/1e6,
+            np.angle(arr),
+            alpha=(np.abs(arr)/vlim)**gamma,
+            cmap=phasecmap,
+            **kwargs,
+        )
+        cax = complex_colorbar(ax, cax=cax, gamma=gamma, vmax=vlim)
+        ax.set_xlabel('Cycle harmonic')
+        ax.set_ylabel('Frequency (MHz)')
+        cax.set_ylabel('Intensity')
+
+        return pc
 
 class PeriodicSpectrum:
     def __init__(self, freq, start_time, I, Q=None, U=None, V=None, samples=None, elapsed=None):
         """
-        Create a new peiodic spectrum from frequency, I, Q, U, and V arrays.
+        Create a new periodic spectrum from frequency, I, Q, U, and V arrays.
         If one of Q, U, or V is present, all must be present with the same shape.
         """
         self.freq = freq
@@ -57,20 +128,33 @@ class PeriodicSpectrum:
         else:
             return self
 
-    def plot(self, ax=None, what='I', shift=0.0, sym_lim=False, vmin=None, vmax=None,
-             **kwargs):
+    def plot(
+        self,
+        ax=None,
+        what='I',
+        shift=0.0,
+        cmap='RdBu_r',
+        sym_lim=True,
+        vmin=None,
+        vmax=None,
+        **kwargs
+    ):
         """
         Plot the periodic spectrum.
 
         Parameters
         ----------
-        ax: Axes on which to plot periodic spectrum. If `None`,
-            a new Figure and Axes will be created.
+        ax: Axes on which to plot the periodic spectrum.
+            If `None`, a new Figure and Axes will be created.
         what: Which Stokes parameter to plot: 'I', 'Q', 'U', or 'V'.
               Ignored if spectrum only has total intensity data.
         shift: Rotation (in cycles) to apply before plotting.
 
         Additional keyword arguments are passed on to ax.pcolormesh().
+
+        Returns
+        -------
+        pc: QuadMesh Artist created by `ax.pcolormesh()`.
         """
         if self.delayed:
             spec = self.compute()
@@ -85,11 +169,36 @@ class PeriodicSpectrum:
         arr = fft_roll(arr, shift*spec.nbin)
         if sym_lim:
             vmin, vmax = symmetrize_limits(arr, vmin, vmax)
-        pc = ax.pcolormesh(spec.phase - shift, spec.freq/1e6, arr, vmin=vmin, vmax=vmax, **kwargs)
+        pc = ax.pcolormesh(
+            spec.phase - shift,
+            spec.freq/1e6,
+            arr,
+            vmin=vmin,
+            vmax=vmax,
+            cmap=cmap,
+            **kwargs,
+        )
         ax.set_xlabel('Phase (cycles)')
         ax.set_ylabel('Frequency (MHz)')
 
         return pc
+
+    def get_cyclic_spectrum(self):
+        I = np.fft.rfft(self.I, axis=1)
+        if self.full_stokes:
+            Q = np.fft.rfft(self.Q, axis=1)
+            U = np.fft.rfft(self.U, axis=1)
+            V = np.fft.rfft(self.V, axis=1)
+        else:
+            Q = None
+            U = None
+            V = None
+        return CyclicSpectrum(
+            self.freq,
+            self.start_time,
+            self.nbin,
+            I, Q, U, V,
+        )
 
 class CPUTimer:
     """
