@@ -19,7 +19,7 @@ def enable(level="INFO", use_stdout=False):
         In a shell, it is preferable to send all messages to stderr so that
         logging output can be redirected separately from stdout.
     """
-    fmt = "<lvl>{level:<8}</lvl> ({name}:{line}): {message}"
+    fmt = "<lvl>{level}</lvl> ({name}:{line}): {message}"
     def stdout_filter(record):
         return record["level"].no < logger.level("WARNING").no
 
