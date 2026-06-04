@@ -7,7 +7,7 @@ from astropy.coordinates import Angle
 from textwrap import dedent
 from datetime import datetime
 
-from .phase_predictor import FreqOnlyPredictor
+from .phase_predictor import FreqOnlyPredictor, PolynomialPredictor
 
 # PSRFITS is a defined subset of the FITS image format used for storing
 # radio pulsar observations, including fold mode and search mode data.
@@ -41,7 +41,12 @@ def to_hdulist(pspec, metadata, predictor):
     hdus = []
     hdus.append(construct_primary_hdu(pspec, metadata))
     hdus.append(construct_history_hdu(pspec))
-    hdus.append(construct_subint_hdu(pspec, metadata, predictor))
+    if isinstance(predictor, PolynomialPredictor):
+        hdus.append(construct_polyco_hdu(predictor))
+        period = None
+    elif isinstance(predictor, FreqOnlyPredictor):
+        period = 1/predictor.f0
+    hdus.append(construct_subint_hdu(pspec, metadata, period))
     return fits.HDUList(hdus)
 
 def construct_primary_hdu(pspec, metadata):
@@ -214,7 +219,7 @@ def construct_history_hdu(pspec):
 
     return history_hdu
 
-def construct_subint_hdu(pspec, metadata, predictor=None):
+def construct_subint_hdu(pspec, metadata, period=None):
     """
     Construct the SUBINT HDU for a FITS file representing this periodic spectrum.
     The SUBINT HDU is the main data portion of the file, and contains a
@@ -227,8 +232,9 @@ def construct_subint_hdu(pspec, metadata, predictor=None):
         Periodic spectrum to represent in PSRFITS format.
     metadata: ObservingMetadata
         Metadata about the observation to include in the header.
-    predictor: PhasePredictor
-        For a FreqOnlyPredictor, the PERIOD column will be added.
+    period: float, optional
+        Folding period, useful when no POLYCO or T2PREDICT HDU is present.
+        If specified, the PERIOD column will be added to the SUBINT HDU.
 
     Returns
     -------
@@ -270,14 +276,14 @@ def construct_subint_hdu(pspec, metadata, predictor=None):
         ('TEL_ZEN', '>f4'): 0.0,
         ('AUX_DM', '>f8'): 0.0,
         ('AUX_RM', '>f8'): 0.0,
-        ('PERIOD', '>f8'): 1/predictor.f0 if predictor else None,
+        ('PERIOD', '>f8'): period,
         ('DAT_FREQ', '>f8', (nchan,)): pspec.freq/1e6,
         ('DAT_WTS', '>f4', (nchan,)): np.ones_like(pspec.freq, dtype='>f4'),
         ('DAT_OFFS', '>f4', (npol*nchan,)): offsets.reshape(1, -1),
         ('DAT_SCL', '>f4', (npol*nchan,)): scales.reshape(1, -1),
         ('DATA', '>i2', (npol, nchan, pspec.nbin)): data,
     }
-    if not isinstance(predictor, FreqOnlyPredictor):
+    if not period:
         del columns[('PERIOD', '>f8')]
 
     header_cards = {
@@ -318,9 +324,18 @@ def construct_subint_hdu(pspec, metadata, predictor=None):
         'TUNIT13': "deg",
         'TUNIT14': "pc cm-3",
         'TUNIT15': "rad m-2",
-        'TUNIT16': "MHz",
-        'TUNIT20': "Jy",
     }
+
+    if period:
+        header_cards['TUNIT16'] = "s"
+        idx_offs = 1
+    else:
+        idx_offs = 0
+
+    header_cards.update({
+        f'TUNIT{16+idx_offs}': "MHz",
+        f'TUNIT{20+idx_offs}': "Jy",
+    })
 
     table = np.array([tuple(columns.values())], dtype=list(columns.keys()))
     subint_hdu = fits.BinTableHDU(data=table)
@@ -329,3 +344,53 @@ def construct_subint_hdu(pspec, metadata, predictor=None):
         subint_hdu.header[key] = value
 
     return subint_hdu
+
+def construct_polyco_hdu(predictor):
+    """
+    Construct a POLYCO HDU representing this predictor object.
+
+    Parameters
+    ----------
+    predictor: PolynomialPredictor
+        The TEMPO-style polynomial predictor (polyco) to represent.
+
+    Returns
+    -------
+    polyco_hdu: astropy.io.fits.BinTableHDU
+        FITS POLYCO header and data unit (HDU) representing the predictor.
+        This is an extension HDU and must be used together with a primary HDU.
+    """
+    rows = []
+    for segment in predictor.segments:
+        columns = {
+            ('DATE_PRO', 'S24'): segment.date_produced,
+            ('POLYVER', 'S16'): segment.version,
+            ('NSPAN', '>i2'): segment.span,
+            ('NCOEF', '>i2'): segment.coeffs.shape[0],
+            ('NPBLK', '>i2'): 1,
+            ('NSITE', 'S8'): segment.site,
+            ('REF_FREQ', '>f8'): segment.ref_freq,
+            ('PRED_PHS', '>f8'): segment.start_phase,
+            ('REF_MJD', '>f8'): segment.epoch.to_mjd(),
+            ('REF_PHS', '>f8'): segment.ref_phase,
+            ('REF_F0', '>f8'): segment.ref_f0,
+            ('LGFITERR', '>f8'): segment.log10_fit_err,
+            ('COEFF', '>f8', (15,)): segment.coeffs,
+        }
+        row = np.array([tuple(columns.values())], dtype=list(columns.keys()))
+        rows.append(row[0]) # extract the record from the array
+    table = np.stack(rows)
+
+    header_cards = {
+        'EXTNAME': "POLYCO",
+        'EXTVER': 1,
+        'TUNIT7': "MHz",
+        'TUNIT11': "Hz",
+    }
+
+    polyco_hdu = fits.BinTableHDU(data=table)
+
+    for key, value in header_cards.items():
+        polyco_hdu.header[key] = value
+
+    return polyco_hdu
