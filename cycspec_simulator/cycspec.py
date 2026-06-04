@@ -10,6 +10,8 @@ from .interpolation import fft_roll
 from .polarization import validate_stokes, coherence_to_stokes
 from .plot_helpers import symmetrize_limits, complex_colorbar
 from .time import Time
+from .psrfits import to_hdulist
+from .metadata import ObservingMetadata
 
 class CyclicSpectrum:
     def __init__(self, freq, start_time, nbin, I, Q=None, U=None, V=None):
@@ -37,6 +39,8 @@ class CyclicSpectrum:
         cax=None,
         what='I',
         phasecmap='cmo.phase',
+        nph=32,
+        nalpha=256,
         gamma=1.,
         **kwargs,
     ):
@@ -75,7 +79,15 @@ class CyclicSpectrum:
             cmap=phasecmap,
             **kwargs,
         )
-        cax = complex_colorbar(ax, cax=cax, gamma=gamma, vmax=vlim)
+        cax = complex_colorbar(
+            ax,
+            cax=cax,
+            gamma=gamma,
+            vmax=vlim,
+            phasecmap=phasecmap,
+            nph=nph,
+            nalpha=nalpha,
+        )
         ax.set_xlabel('Cycle harmonic')
         ax.set_ylabel('Frequency (MHz)')
         cax.set_ylabel('Intensity')
@@ -184,6 +196,9 @@ class PeriodicSpectrum:
         return pc
 
     def get_cyclic_spectrum(self):
+        """
+        Get the cyclic spectrum associated with this periodic spectrum.
+        """
         I = np.fft.rfft(self.I, axis=1)
         if self.full_stokes:
             Q = np.fft.rfft(self.Q, axis=1)
@@ -199,6 +214,26 @@ class PeriodicSpectrum:
             self.nbin,
             I, Q, U, V,
         )
+
+    def save_psrfits(self, filename, metadata=None, overwrite=False):
+        """
+        Save this periodic spectrum as a PSRFITS file.
+
+        Parameters
+        ----------
+        filename: str or pathlib.Path
+            Name of FITS file in which to save the data.
+        metadata: ObservingMetadata
+            Metadata about the observation to include in the header.
+            If `None`, default values will be used.
+        overwrite: bool, optional (default False)
+            If `True`, overwrite the destination file if it exists.
+        """
+        if metadata is None:
+            metadata = ObservingMetadata.default()
+
+        hdul = to_hdulist(self, metadata)
+        hdul.writeto(filename, overwrite=overwrite)
 
 class CPUTimer:
     """
