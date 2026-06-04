@@ -7,6 +7,8 @@ from astropy.coordinates import Angle
 from textwrap import dedent
 from datetime import datetime
 
+from .phase_predictor import FreqOnlyPredictor
+
 # PSRFITS is a defined subset of the FITS image format used for storing
 # radio pulsar observations, including fold mode and search mode data.
 # Documentation of the header cards and table columns used in the PSRFITS
@@ -17,7 +19,7 @@ from datetime import datetime
 # (Base/Formats/PSRFITS/psrheader.fits) is also useful for determining
 # appropriate default values.
 
-def to_hdulist(pspec, metadata):
+def to_hdulist(pspec, metadata, predictor):
     """
     Convert an periodic spectrum to a PSRFITS HDU list for saving.
 
@@ -27,6 +29,8 @@ def to_hdulist(pspec, metadata):
         Periodic spectrum to represent in PSRFITS format.
     metadata: ObservingMetadata
         Metadata about the observation to include in the header.
+    predictor: PhasePredictor
+        Phase predictor used to fold the data.
 
     Returns
     -------
@@ -37,7 +41,7 @@ def to_hdulist(pspec, metadata):
     hdus = []
     hdus.append(construct_primary_hdu(pspec, metadata))
     hdus.append(construct_history_hdu(pspec))
-    hdus.append(construct_subint_hdu(pspec, metadata))
+    hdus.append(construct_subint_hdu(pspec, metadata, predictor))
     return fits.HDUList(hdus)
 
 def construct_primary_hdu(pspec, metadata):
@@ -210,7 +214,7 @@ def construct_history_hdu(pspec):
 
     return history_hdu
 
-def construct_subint_hdu(pspec, metadata):
+def construct_subint_hdu(pspec, metadata, predictor=None):
     """
     Construct the SUBINT HDU for a FITS file representing this periodic spectrum.
     The SUBINT HDU is the main data portion of the file, and contains a
@@ -221,6 +225,10 @@ def construct_subint_hdu(pspec, metadata):
     ----------
     pspec: PeriodicSpectrum
         Periodic spectrum to represent in PSRFITS format.
+    metadata: ObservingMetadata
+        Metadata about the observation to include in the header.
+    predictor: PhasePredictor
+        For a FreqOnlyPredictor, the PERIOD column will be added.
 
     Returns
     -------
@@ -262,13 +270,15 @@ def construct_subint_hdu(pspec, metadata):
         ('TEL_ZEN', '>f4'): 0.0,
         ('AUX_DM', '>f8'): 0.0,
         ('AUX_RM', '>f8'): 0.0,
-        ('PERIOD', '>f8'): pulse_freq,
+        ('PERIOD', '>f8'): 1/predictor.f0 if predictor else None,
         ('DAT_FREQ', '>f8', (nchan,)): pspec.freq/1e6,
         ('DAT_WTS', '>f4', (nchan,)): np.ones_like(pspec.freq, dtype='>f4'),
         ('DAT_OFFS', '>f4', (npol*nchan,)): offsets.reshape(1, -1),
         ('DAT_SCL', '>f4', (npol*nchan,)): scales.reshape(1, -1),
         ('DATA', '>i2', (npol, nchan, pspec.nbin)): data,
     }
+    if not isinstance(predictor, FreqOnlyPredictor):
+        del columns[('PERIOD', '>f8')]
 
     header_cards = {
         'EXTNAME': "SUBINT",

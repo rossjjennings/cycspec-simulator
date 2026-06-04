@@ -215,7 +215,7 @@ class PeriodicSpectrum:
             I, Q, U, V,
         )
 
-    def save_psrfits(self, filename, metadata=None, overwrite=False):
+    def save_psrfits(self, filename, metadata=None, predictor=None, overwrite=False):
         """
         Save this periodic spectrum as a PSRFITS file.
 
@@ -226,13 +226,15 @@ class PeriodicSpectrum:
         metadata: ObservingMetadata
             Metadata about the observation to include in the header.
             If `None`, default values will be used.
+        predictor: PhasePredictor
+            Phase predictor used to fold the data.
         overwrite: bool, optional (default False)
             If `True`, overwrite the destination file if it exists.
         """
         if metadata is None:
             metadata = ObservingMetadata.default()
 
-        hdul = to_hdulist(self, metadata)
+        hdul = to_hdulist(self, metadata, predictor)
         hdul.writeto(filename, overwrite=overwrite)
 
 class CPUTimer:
