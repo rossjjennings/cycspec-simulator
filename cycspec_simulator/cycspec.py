@@ -95,13 +95,48 @@ class CyclicSpectrum:
         return pc
 
 class PeriodicSpectrum:
-    def __init__(self, freq, start_time, I, Q=None, U=None, V=None, samples=None, elapsed=None):
+    def __init__(
+        self,
+        freq,
+        start_time,
+        fold_time,
+        predictor,
+        I, Q=None, U=None, V=None,
+        samples=None,
+        elapsed=None,
+        metadata=None,
+        dm=0.0,
+    ):
         """
         Create a new periodic spectrum from frequency, I, Q, U, and V arrays.
         If one of Q, U, or V is present, all must be present with the same shape.
+
+        Parameters
+        ----------
+        freq: np.ndarray
+            Array of observing frequencies.
+        start_time: cycspec_simulator.Time
+            Start time of the observation
+        fold_time: float
+            Time, in seconds, for which data was folded.
+        predictor: PhasePredictor
+            Phase predictor used to fold the data.
+        I, Q, U, V: np.ndarray
+            Data in each Stokes parameter.
+        samples: np.ndarray, optional
+            Number of samples contributing to each data bin.
+        elapsed: float, optional
+            Time, in ms, taken to produce the cyclic spectrum.
+        metadata: ObservingMetadata, optional
+            Observing metadata associated with the cyclic spectrum.
+            If `None`, default values will be used.
+        dm: float, optional (default 0.0)
+            Dispersion measure, in pc cm**-3, applied to the cyclic spectrum.
         """
         self.freq = freq
         self.start_time = start_time
+        self.fold_time = fold_time
+        self.predictor = predictor
 
         self.full_stokes, self.shape = validate_stokes(I, Q, U, V)
         self.I = I
@@ -112,6 +147,10 @@ class PeriodicSpectrum:
 
         self.samples = samples
         self.elapsed = elapsed
+        if metadata is None:
+            metadata = ObservingMetadata.default()
+        self.metadata = metadata
+        self.dm = dm
 
         self.nbin = self.shape[-1]
         self.phase = np.linspace(0, 1, self.nbin, endpoint=False)
@@ -136,7 +175,17 @@ class PeriodicSpectrum:
             logger.info(f"Elapsed time: {elapsed:g} ms")
             throughput = 4*np.sum(samples)/(elapsed/1000)
             logger.info(f"Throughput: {throughput:g} products/sec.")
-            return PeriodicSpectrum(self.freq, self.start_time, I, Q, U, V, samples, elapsed)
+            return PeriodicSpectrum(
+                self.freq,
+                self.start_time,
+                self.fold_time,
+                self.predictor,
+                I, Q, U, V,
+                samples,
+                elapsed,
+                self.metadata,
+                self.dm,
+            )
         else:
             return self
 
@@ -215,7 +264,7 @@ class PeriodicSpectrum:
             I, Q, U, V,
         )
 
-    def save_psrfits(self, filename, metadata=None, predictor=None, overwrite=False):
+    def save_psrfits(self, filename, overwrite=False):
         """
         Save this periodic spectrum as a PSRFITS file.
 
@@ -223,18 +272,10 @@ class PeriodicSpectrum:
         ----------
         filename: str or pathlib.Path
             Name of FITS file in which to save the data.
-        metadata: ObservingMetadata
-            Metadata about the observation to include in the header.
-            If `None`, default values will be used.
-        predictor: PhasePredictor
-            Phase predictor used to fold the data.
         overwrite: bool, optional (default False)
             If `True`, overwrite the destination file if it exists.
         """
-        if metadata is None:
-            metadata = ObservingMetadata.default()
-
-        hdul = to_hdulist(self, metadata, predictor)
+        hdul = to_hdulist(self)
         hdul.writeto(filename, overwrite=overwrite)
 
 class CPUTimer:
@@ -446,5 +487,13 @@ def cycfold_cpu(
         pspec_CI,
         data.feed_poln,
     )
-    pspec = PeriodicSpectrum(freq, data.start_time, I, Q, U, V, samples, elapsed)
+    pspec = PeriodicSpectrum(
+        freq,
+        data.start_time,
+        data.tspan,
+        phase_predictor,
+        I, Q, U, V,
+        samples,
+        elapsed,
+    )
     return pspec

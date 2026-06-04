@@ -19,7 +19,7 @@ from .phase_predictor import FreqOnlyPredictor, PolynomialPredictor
 # (Base/Formats/PSRFITS/psrheader.fits) is also useful for determining
 # appropriate default values.
 
-def to_hdulist(pspec, metadata, predictor):
+def to_hdulist(pspec):
     """
     Convert an periodic spectrum to a PSRFITS HDU list for saving.
 
@@ -27,10 +27,6 @@ def to_hdulist(pspec, metadata, predictor):
     ----------
     pspec: PeriodicSpectrum
         Periodic spectrum to represent in PSRFITS format.
-    metadata: ObservingMetadata
-        Metadata about the observation to include in the header.
-    predictor: PhasePredictor
-        Phase predictor used to fold the data.
 
     Returns
     -------
@@ -39,17 +35,17 @@ def to_hdulist(pspec, metadata, predictor):
         The data can be written to file using the `hdul.writeto()` method.
     """
     hdus = []
-    hdus.append(construct_primary_hdu(pspec, metadata))
+    hdus.append(construct_primary_hdu(pspec))
     hdus.append(construct_history_hdu(pspec))
-    if isinstance(predictor, PolynomialPredictor):
-        hdus.append(construct_polyco_hdu(predictor))
+    if isinstance(pspec.predictor, PolynomialPredictor):
+        hdus.append(construct_polyco_hdu(pspec.predictor))
         period = None
-    elif isinstance(predictor, FreqOnlyPredictor):
-        period = 1/predictor.f0
-    hdus.append(construct_subint_hdu(pspec, metadata, period))
+    elif isinstance(pspec.predictor, FreqOnlyPredictor):
+        period = 1/pspec.predictor.f0
+    hdus.append(construct_subint_hdu(pspec, period))
     return fits.HDUList(hdus)
 
-def construct_primary_hdu(pspec, metadata):
+def construct_primary_hdu(pspec):
     """
     Construct the primary HDU for a FITS file representing this periodic spectrum.
     The primary HDU of a PSRFITS file contains only header information, with the
@@ -62,8 +58,6 @@ def construct_primary_hdu(pspec, metadata):
     ----------
     pspec: PeriodicSpectrum
         Periodic spectrum to represent in PSRFITS format.
-    metadata: ObservingMetadata
-        Metadata about the observation to include in the header.
 
     Returns
     -------
@@ -91,20 +85,20 @@ def construct_primary_hdu(pspec, metadata):
         'HDRVER': "5.4",
         'FITSTYPE': "PSRFITS",
         'DATE': datetime.strftime(datetime.now(), '%Y-%m-%dT%H:%M:%S'),
-        'OBSERVER': metadata.observer,
+        'OBSERVER': pspec.metadata.observer,
         'PROJID': "",
-        'TELESCOP': metadata.telescope,
+        'TELESCOP': pspec.metadata.telescope,
         'ANT_X': "*",
         'ANT_Y': "*",
         'ANT_Z': "*",
-        'FRONTEND': metadata.frontend,
+        'FRONTEND': pspec.metadata.frontend,
         'IBEAM': "",
         'NRCVR': 2 if pspec.full_stokes else 1,
         'FD_POLN': "LIN",
         'FD_HAND': "*",
         'FD_SANG': "*",
         'FD_XYPH': "*",
-        'BACKEND': metadata.backend,
+        'BACKEND': pspec.metadata.backend,
         'BECONFIG': "",
         'BE_PHASE': "*",
         'BE_DCC': "*",
@@ -119,11 +113,11 @@ def construct_primary_hdu(pspec, metadata):
         'OBSNCHAN': nchan,
         'CHAN_DM': "*",
         'PNT_ID': "",
-        'SRC_NAME': metadata.src_name,
+        'SRC_NAME': pspec.metadata.src_name,
         'COORD_MD': "J2000",
         'EQUINOX': 2000.0,
-        'RA': metadata.location.ra.deg,
-        'DEC': metadata.location.dec.deg,
+        'RA': pspec.metadata.location.ra.deg,
+        'DEC': pspec.metadata.location.dec.deg,
         'BMAJ': "*",
         'BMIN': "*",
         'BPA': "*",
@@ -219,7 +213,7 @@ def construct_history_hdu(pspec):
 
     return history_hdu
 
-def construct_subint_hdu(pspec, metadata, period=None):
+def construct_subint_hdu(pspec, period=None):
     """
     Construct the SUBINT HDU for a FITS file representing this periodic spectrum.
     The SUBINT HDU is the main data portion of the file, and contains a
@@ -230,8 +224,6 @@ def construct_subint_hdu(pspec, metadata, period=None):
     ----------
     pspec: PeriodicSpectrum
         Periodic spectrum to represent in PSRFITS format.
-    metadata: ObservingMetadata
-        Metadata about the observation to include in the header.
     period: float, optional
         Folding period, useful when no POLYCO or T2PREDICT HDU is present.
         If specified, the PERIOD column will be added to the SUBINT HDU.
@@ -265,8 +257,8 @@ def construct_subint_hdu(pspec, metadata, period=None):
         ('TSUBINT', '>f8'): 1.0,
         ('OFFS_SUB', '>f8'): 0.0,
         ('LST_SUB', '>f8'): 0.0,
-        ('RA_SUB', '>f8'): metadata.location.ra.deg,
-        ('DEC_SUB', '>f8'): metadata.location.dec.deg,
+        ('RA_SUB', '>f8'): pspec.metadata.location.ra.deg,
+        ('DEC_SUB', '>f8'): pspec.metadata.location.dec.deg,
         ('GLON_SUB', '>f8'): 0.0,
         ('GLAT_SUB', '>f8'): 0.0,
         ('FD_ANG', '>f4'): 0.0,

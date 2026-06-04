@@ -349,5 +349,13 @@ def cycfold_gpu(
         pspec_CI,
         data.feed_poln,
     )
-    pspec = PeriodicSpectrum(freq, data.start_time, I, Q, U, V, samples, elapsed)
+    pspec = PeriodicSpectrum(
+        freq,
+        data.start_time,
+        data.tspan,
+        phase_predictor,
+        I, Q, U, V,
+        samples,
+        elapsed,
+    )
     return pspec

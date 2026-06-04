@@ -208,7 +208,15 @@ class ChannelizedData:
             U = roll(U, -ncyc//2, axis=0)
             V = roll(V, -ncyc//2, axis=0)
 
-        result = PeriodicSpectrum(freq, self.start_time, I, Q, U, V, samples, elapsed)
+        result = PeriodicSpectrum(
+            freq,
+            self.start_time,
+            self.tspan,
+            predictor,
+            I, Q, U, V,
+            samples,
+            elapsed,
+        )
         if compute:
             result = result.compute()
         return result
@@ -250,4 +258,10 @@ class ChannelizedData:
         I, Q, U, V = coherence_to_stokes(
             AA, BB, CR, CI, self.feed_poln
         )
-        return PeriodicSpectrum(self.freqs, self.start_time, I, Q, U, V)
+        return PeriodicSpectrum(
+            self.freqs,
+            self.start_time,
+            self.tspan,
+            predictor,
+            I, Q, U, V,
+        )
