@@ -187,7 +187,7 @@ class BasebandModel:
 
         return data
 
-    def sample_time(self, duration, phase_start=0, interp=lerp):
+    def sample_time(self, duration, t_start=None, interp=lerp):
         """
         Simulate a given span of time from the modeled baseband time series.
 
@@ -201,7 +201,7 @@ class BasebandModel:
                 `fft_interp` and `lerp` (the default) both work.
         """
         n_samples = np.int64(duration*self.bandwidth)
-        return sample(n_samples, phase_start, interp)
+        return self.sample(n_samples, t_start, interp)
 
 def get_time_axis(start_time, n_samples, bandwidth, delayed=False, device=False, chunks="auto"):
     if delayed:
