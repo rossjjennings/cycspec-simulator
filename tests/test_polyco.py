@@ -8,7 +8,7 @@ from cycspec_simulator import PolynomialPredictor, Time
 @pytest.fixture
 def polyco():
     tests_dir = os.path.dirname(__file__)
-    filename = os.path.join(tests_dir, "../examples/polyco-B1937+21-60000.dat")
+    filename = os.path.join(tests_dir, "data/polyco-B1937+21-60000.dat")
     filename = os.path.normpath(filename)
     return PolynomialPredictor.from_file(filename)
 

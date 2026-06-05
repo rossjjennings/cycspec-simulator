@@ -8,11 +8,11 @@ from cycspec_simulator import TemplateProfile
 @pytest.fixture
 def template_file():
     tests_dir = os.path.dirname(__file__)
-    filename = os.path.join(tests_dir, "../examples/B1937+21.Rcvr1_2.GUPPI.15y.x.sum.sm")
+    filename = os.path.join(tests_dir, "data/B1937+21.Rcvr1_2.GUPPI.15y.x.sum.sm")
     return os.path.normpath(filename)
 
 def template_from_scratch():
-    phase = np.linspace(0, 1, 2048, endpoint=False)
+    phase = np.linspace(-0.5, 0.5, 2048, endpoint=False)
     width = 0.01
     I = np.exp(-phase**2/(2*width**2))
     template = TemplateProfile(I)
