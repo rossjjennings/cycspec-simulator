@@ -23,6 +23,8 @@ def complex_colorbar(
     vmax=1.,
     gamma=1.,
     phasecmap=cm.phase,
+    nph = 36,
+    nalpha = 256,
 ):
     """
     Create a colorbar for a pcolor-style plot that uses domain coloring to
@@ -40,6 +42,8 @@ def complex_colorbar(
     gamma: Power-law exponent used for gamma correction.
     phasecmap: Colormap used to determine the color for each phase.
         Defaults to the perceptually uniform cmocean "phase" colormap.
+    nph: Number of phase points to use in colorbar
+    nalpha: Number of amplitude points to use in colorbar
 
     Returns
     -------
@@ -50,8 +54,6 @@ def complex_colorbar(
     cbar_pos = fig.axes[-1].get_position()
     cbar.remove()
 
-    nph = 36
-    nalpha = 256
     alpha_min = (vmin/vmax)**gamma
     phases = np.linspace(-np.pi, np.pi, nph, endpoint=False) + np.pi/nph
     alphas = np.linspace(alpha_min, 1., nalpha, endpoint=False) + 0.5/nalpha
