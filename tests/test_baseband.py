@@ -1,4 +1,5 @@
 import numpy as np
+import dask.array as da
 import pytest
 import os
 
@@ -12,6 +13,8 @@ def baseband_model():
         "data/B1937+21.Rcvr1_2.GUPPI.15y.x.sum.sm"
     )
     template = cs.TemplateProfile.from_file(template_fname)
+    template.normalize()
+    template.make_posdef()
     polyco_fname = os.path.join(
         tests_dir,
         "data/polyco-B1937+21-60000.dat",
@@ -51,3 +54,23 @@ def test_sample_time(baseband_model):
     assert np.abs(data.tspan - 0.005) <= 1e-10
     assert data.A.shape == (5000,)
     assert data.B.shape == (5000,)
+
+def test_sample_rng(baseband_model):
+    rng = np.random.default_rng()
+    data = baseband_model.sample(4096, rng=rng)
+    assert isinstance(data, cs.BasebandData)
+    assert np.abs(data.tspan - 0.004096) <= 1e-10
+    assert data.A.shape == (4096,)
+    assert data.B.shape == (4096,)
+    assert isinstance(data.A, np.ndarray)
+    assert isinstance(data.B, np.ndarray)
+
+def test_sample_dask(baseband_model):
+    rng = da.random.default_rng()
+    data = baseband_model.sample(4096, rng=rng)
+    assert isinstance(data, cs.BasebandData)
+    assert np.abs(data.tspan - 0.004096) <= 1e-10
+    assert data.A.shape == (4096,)
+    assert data.B.shape == (4096,)
+    assert isinstance(data.A, da.Array)
+    assert isinstance(data.B, da.Array)
